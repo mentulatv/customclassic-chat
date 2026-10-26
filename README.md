@@ -4,6 +4,12 @@ A modern chat panel for **MapleStory Classic World** that sits exactly inside th
 chat box and keeps the **megaphones out of your chat**. Map chat, whispers, party and buddy
 chat stay readable; megaphones get their own tab instead of flooding everything else.
 
+![Maple Chat over the game's chat box: the All tab with map chat, whispers, buddy and party chat, and dots on Mega and Watch](docs/chat-all.png)
+
+![The Mega tab with megaphones on their coloured bands, and a watch-list catch: a gold note above the chat and a star on the line](docs/chat-mega-watch.png)
+
+<sub>Screenshots use invented players and chat over a blurred game scene.</sub>
+
 - **Tabs** like modern MapleStory: All (everything but megaphones), Whisper, Party, Buddy, Mega
   and Watch, plus **a tab of your own** showing just the chat types you pick. A red dot marks
   a tab with messages you haven't seen.
@@ -81,6 +87,10 @@ game's chat box, and a panel left on a monitor that's gone comes back to the mid
 ## Settings
 
 Right-click the tray icon → **Settings…**. Changes apply right away and are remembered.
+
+<img src="docs/settings-appearance.png" alt="Settings, Appearance: text size, transparency and colour swatches" width="49%"> <img src="docs/settings-chat.png" alt="Settings, Chat: time stamps, history, what to leave out, sounds" width="49%">
+
+<img src="docs/settings-watch-list.png" alt="Settings, Watch list: words and items to look out for, and how to be told" width="49%">
 
 - Text size (or match the game's), how see-through ◐ makes it, the panel's opacity
 - Position: on the game's chat, or **unlocked** to go anywhere, and **Reset position**
