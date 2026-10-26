@@ -39,18 +39,33 @@ Windows 10/11 only. The game has to run **windowed** or **borderless**.
 
 ---
 
-## Quick start
+## Download
 
-1. Install **Python 3.11 or newer** from [python.org](https://www.python.org/downloads/)
-   (tick "Add python.exe to PATH").
-2. Download this repository (green **Code** button → **Download ZIP**) and unzip it anywhere.
-3. Double-click **`setup.bat`** once. It makes a private Python environment and installs
-   what Maple Chat needs (a few hundred MB, mostly the text-recognition model).
-4. Start the game, then double-click **`start.bat`**. Maple Chat waits for the game, finds
+**[⬇ MapleChat-win64.zip](https://github.com/mentulatv/maple-chat/releases/latest/download/MapleChat-win64.zip)**
+(the latest version, about 110 MB; nothing to install)
+
+1. Unzip it anywhere, for example `Documents\MapleChat`.
+2. Start the game, then double-click **`MapleChat.exe`**. Maple Chat waits for the game, finds
    its chat box and settles into it. Its blue speech-bubble icon appears in the taskbar's
    notification area (bottom right, maybe behind the **^** arrow).
 
-Want to look around first? `start.bat --demo` shows made-up messages without reading anything.
+> Windows may say "Windows protected your PC", because the program isn't code-signed.
+> Click **More info → Run anyway**.
+
+Want to look around first? **`Maple Chat demo.bat`** shows made-up messages without reading
+anything. To update, unzip a newer version over the old folder: your settings and chat history
+(`chat.json`, `chat_history.jsonl`) stay.
+
+**Game settings:** any resolution and **UI Size** work; **1280×720 or larger** is recommended,
+since smaller windows make the chat text tiny to read. Run the game **windowed**: an overlay
+can't draw over a fullscreen game, so in the "(Full Screen)" resolutions the panel may not show.
+Change the UI Size or resolution and Maple Chat fits itself again within a few seconds.
+
+### Running from source
+
+Install **Python 3.11 or newer** ([python.org](https://www.python.org/downloads/), tick "Add
+python.exe to PATH"), download this repository, double-click **`setup.bat`** once, then
+**`start.bat`** (`start.bat --demo` for the demo). `build.bat` makes the .exe and the zip.
 
 ## Using it
 

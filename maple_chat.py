@@ -39,7 +39,9 @@ from collections import deque
 import twitch_chat
 from pathlib import Path
 
-HERE = Path(__file__).resolve().parent
+# packaged as an .exe, your settings, history and caches live next to it (the program's own
+# files are in its _internal folder); run from source, next to this file
+HERE = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
 SETTINGS_FILE = HERE / "chat.json"
 CACHE_DIR = HERE / "cache"
 DEFAULTS = {
@@ -753,7 +755,10 @@ def find_lines(img, reader) -> tuple[dict, float] | None:
         bottom = chat_bottom(arr, (right + 2 * end) // 3, box["top"] + box["height"] // 2, pitch)
         if bottom and bottom > box["top"] + pitch:
             box = {**box, "height": bottom - box["top"]}
-    return {**box, "width": int(width), "bar": (end - right) if end else None}, pitch
+    bar = (end - right) if end else None
+    if bar and not pitch * 0.8 <= bar <= pitch * 1.6:  # the game's is about 1.15 lines wide: something else was measured
+        bar = None
+    return {**box, "width": int(width), "bar": bar}, pitch
 
 
 def scrollbar_right(arr, centers, start: int) -> int | None:
@@ -839,7 +844,7 @@ def read_loop(app) -> None:
     reader, dedupe, palette = core.Reader(cfg), Dedupe(), (cfg.colors, cfg.backgrounds)
     dedupe.seed(list(app.log.messages), time.time())  # what the game's chat still shows from before a restart
     capture, hwnd, last_error = None, None, ""
-    last_check, tops, watch = time.time(), deque(maxlen=6), CoverWatch()
+    last_check, tops, watch, lost = time.time(), deque(maxlen=6), CoverWatch(), 0
     while not app.stop.is_set():
         t0 = time.time()
         try:
@@ -892,11 +897,16 @@ def read_loop(app) -> None:
                         y1 = min(c["height"], int(r["top"] + r["height"] + line * 0.5))
                         img = frame_image(frame, ox + x0, oy + y0, ox + x1, oy + y1)
                         found = find_lines(img, reader) if img else None
-                        if found:
+                        lost = 0 if found else lost + 1
+                        if found and abs(found[1] - app.line) > app.line * 0.2:
+                            app.want_fit = True  # the game's UI Size changed: the lines are another size, fit afresh
+                        elif found:
                             box = {**found[0], "left": found[0]["left"] + x0, "top": found[0]["top"] + y0}
                             new = resized(r, box, app.line, tops)
                             if new:
                                 app.events.put(("fit", to_relative({**new, "bar": app.bar_px}, app.line, c)))
+                        elif lost >= 3 and not app.covered:
+                            app.want_fit, lost = True, 0  # no chat where it should be for 15 s: look for it afresh
         except Exception as e:  # keep reading through a bad frame; say so once
             error = f"Skipped a read ({e.__class__.__name__}: {e})"[:120]
             if error != last_error:
@@ -1607,11 +1617,24 @@ def main(argv: list[str]) -> None:
         print_replay([Path(a) for a in argv[argv.index("--replay") + 1:] if not a.startswith("--")])
         return
     if not overlay.single_instance("MapleChatOverlay"):
+        message("Maple Chat is already running. Its blue speech-bubble icon is in the taskbar's notification "
+                "area (bottom right, maybe behind the ^ arrow).")
         return
     overlay.dpi_aware()
     ChatPanel(load_settings(), demo="--demo" in argv, always_show="--always-show" in argv,
               verbose="--verbose" in argv).root.mainloop()
 
 
+def message(text: str) -> None:
+    """A plain Windows message box: the .exe has no console to print to."""
+    import ctypes
+    ctypes.windll.user32.MessageBoxW(None, text, "Maple Chat", 0x40)  # MB_ICONINFORMATION
+
+
 if __name__ == "__main__":
-    main(sys.argv[1:])
+    try:
+        main(sys.argv[1:])
+    except Exception:  # without a console a crash would vanish: keep it in crash.log and say so
+        import traceback
+        (HERE / "crash.log").write_text(traceback.format_exc(), encoding="utf-8")
+        message(f"Maple Chat stopped because of an error. The details are in {HERE / 'crash.log'}.")

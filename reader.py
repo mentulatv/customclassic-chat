@@ -19,7 +19,9 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-HERE = Path(__file__).resolve().parent
+# packaged as an .exe, your settings, history and caches live next to it (the program's own
+# files are in its _internal folder); run from source, next to this file
+HERE = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
 CONFIG = HERE / "config.toml"
 
 SPEAKER = re.compile(r"^\W{0,4}(?:\[[^\]]{1,25}\]\s*)?[A-Za-z0-9]{3,13}\s*[:;]\s")

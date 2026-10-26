@@ -15,13 +15,16 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 import time
 from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 
 from rapidfuzz import fuzz, process
 
-HERE = Path(__file__).resolve().parent
+# packaged as an .exe, your settings, history and caches live next to it (the program's own
+# files are in its _internal folder); run from source, next to this file
+HERE = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
 NAMES_FILE = HERE / "cache" / "names.json"
 NAMES_URL = "https://mapleprice.mentula.tv/api/names"
 NAMES_EVERY = 3600
