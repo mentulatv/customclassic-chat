@@ -1,4 +1,4 @@
-"""Twitch chat for Maple Chat: a channel's chat, read anonymously by its name.
+"""Twitch chat for CustomClassic Chat: a channel's chat, read anonymously by its name.
 
 Twitch lets anyone read a channel's chat as a guest ("justinfan" + a number) over its chat
 server, so no login, key or app is needed, and nothing is ever sent to the chat. Messages
@@ -65,7 +65,7 @@ def readable(color: str) -> str:
 
 
 def message(msg: dict, now: float) -> dict | None:
-    """A chat message as Maple Chat shows it, or None for anything else."""
+    """A chat message as CustomClassic Chat shows it, or None for anything else."""
     if msg["cmd"] != "PRIVMSG" or msg["text"] is None:
         return None
     tags, text = msg["tags"], msg["text"]

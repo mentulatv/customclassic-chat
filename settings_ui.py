@@ -1,4 +1,4 @@
-"""Maple Chat's settings window: a sidebar of sections, each a page of cards.
+"""CustomClassic Chat's settings window: a sidebar of sections, each a page of cards.
 
 Every change applies as it's made (the panel's own methods do the work and save), so there is
 no Save button: Done just closes the window. The pages follow what a player looks for:
@@ -93,7 +93,7 @@ class SettingsWindow:
     def __init__(self, app):
         self.app, self.opts = app, app.opts
         top = self.top = tk.Toplevel(app.root)
-        top.title("Maple Chat settings")
+        top.title("CustomClassic Chat settings")
         top.configure(bg=BG)
         top.resizable(False, False)
         top.attributes("-topmost", True)
@@ -202,7 +202,7 @@ class SettingsWindow:
         button(c, "Reset to default colours", self.reset_colours).pack(anchor="w", pady=(10, 0))
 
     def colour_of(self, key: str) -> str:
-        from maple_chat import COLORS, PANEL
+        from customclassic_chat import COLORS, PANEL
         return (self.opts["panel_bg"] or PANEL) if key == "panel_bg" else (self.opts["colors"].get(key) or COLORS[key])
 
     def paint_swatches(self) -> None:
@@ -236,9 +236,9 @@ class SettingsWindow:
 
     def chat(self, page) -> None:
         app, opts = self.app, self.opts
-        from maple_chat import PADDED_KINDS
+        from customclassic_chat import PADDED_KINDS
         c = card(page, "Time stamps and history",
-                 "Time stamps come from Maple Chat's own clock. The chat is kept between restarts.")
+                 "Time stamps come from CustomClassic Chat's own clock. The chat is kept between restarts.")
         stamps = tk.StringVar(value=opts["timestamps"])
         row = tk.Frame(c, bg=CARD)
         row.pack(fill="x")
@@ -302,7 +302,7 @@ class SettingsWindow:
 
     def tabs(self, page) -> None:
         app, opts = self.app, self.opts
-        from maple_chat import CUSTOM_KINDS
+        from customclassic_chat import CUSTOM_KINDS
         custom = {"on": False, "name": "Custom", "kinds": [], **(opts["custom_tab"] or {})}
         on = tk.BooleanVar(value=custom["on"])
         name = tk.StringVar(value=custom["name"])

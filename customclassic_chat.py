@@ -1,4 +1,4 @@
-"""Maple Chat: a modern chat panel over the game's own chat box, without the megaphones.
+"""CustomClassic Chat: a modern chat panel over the game's own chat box, without the megaphones.
 
 It sits exactly inside the game's chat box (its tab strip is the box's top line) and shows the
 same chat sorted into tabs: All (everything but megaphones), Whisper, Party, Buddy and Mega
@@ -15,14 +15,14 @@ leaves this PC. The panel hides while the game isn't the active window.
 See-through: clicking ◐ on the tab strip makes the messages 90% see-through and lets clicks
 through, so the game's own chat shows and can be clicked; clicking it again makes them solid.
 
-    start.bat                   (or: pythonw maple_chat.py)
+    start.bat                   (or: pythonw customclassic_chat.py)
     Ctrl+Alt+F5   adjust: drag to move, drag the bottom-right corner to resize; press again to save
     Ctrl+Alt+F3   reset position: back on the game's chat box, fitted again
     Ctrl+Alt+F6   hide / show
     Ctrl+Alt+F7   quit
 
-    python maple_chat.py --demo                       made-up messages, to try the tabs (reads nothing)
-    python maple_chat.py --replay shot1.png ...       read saved screenshots and print what goes where
+    python customclassic_chat.py --demo                       made-up messages, to try the tabs (reads nothing)
+    python customclassic_chat.py --replay shot1.png ...       read saved screenshots and print what goes where
 
 Settings: chat.json holds the panel's place (relative to the game window) and the options in DEFAULTS.
 """
@@ -53,7 +53,7 @@ DEFAULTS = {
     "keep_hours": 12,         # chat history kept between restarts, in hours; 0 keeps it forever
     "timestamps": "seconds",  # "seconds" [18:16:05], "minutes" [18:16] or "off"
     "opacity": 1.0,           # the panel's opacity when ◐ is off
-    "panel_bg": None,         # background colour; None: Maple Chat's dark blue
+    "panel_bg": None,         # background colour; None: CustomClassic Chat's dark blue
     "colors": {},             # text colour per chat type (map, whisper, party, buddy, system, mega); empty: the game's
     "see_through": False,     # ◐ clicked on: the messages see-through and click-through until clicked off
     "peek_alpha": 0.1,        # how opaque they are then: 0.1 is 90% see-through
@@ -87,7 +87,7 @@ CUSTOM_KINDS = [("map", "Map chat"), ("whisper", "Whispers"), ("party", "Party")
                 ("mega", "Megaphones"), ("system", "System messages"), ("watch", "Watch list catches")]
 COLORS = {"twitch": "#bf94ff", "map": "#ffffff", "whisper": "#00ff00", "party": "#ff8fc7", "buddy": "#ff9900", "other": "#c8d2e4",
           "mega": "#f2a7cf", "system": "#ffafaf", "status": "#ffc24b"}  # the game's own where measured; notes in amber
-# the game's own pop-ups that appear over the chat box: Maple Chat steps aside while one is up
+# the game's own pop-ups that appear over the chat box: CustomClassic Chat steps aside while one is up
 POPUP = re.compile(r"(?i)\b(?:party|guild|alliance|family)\s+invit\w*\s+from\b|\b(?:trade|friend|buddy)\s+request\s+from\b"
                    r"|\binvited\s+you\b")
 PANEL, STRIP, TAB, TAB_ON, INK, SOFT, DOT = "#111827", "#0b1120", "#1c2740", "#2f5597", "#eef3fb", "#8f9db5", "#ff4b4b"
@@ -348,7 +348,7 @@ STAMP_FORMATS = {"seconds": "%H:%M:%S", "minutes": "%H:%M", "off": None}
 
 
 def line_text(msg: dict, stamps: str = "seconds") -> str:
-    """A message as one chat line. The time is Maple Chat's own clock when the line was read,
+    """A message as one chat line. The time is CustomClassic Chat's own clock when the line was read,
     so it's there even when the game shows no time stamps."""
     who = msg["name"]
     if msg["kind"] == "whisper":
@@ -719,7 +719,7 @@ def start_tray(app):
         pystray.Menu.SEPARATOR,
         pystray.MenuItem("Quit", send("hotkey", HK_QUIT)),
     )
-    icon = pystray.Icon("MapleChat", icon_image(), "Maple Chat", menu)
+    icon = pystray.Icon("CustomClassicChat", icon_image(), "CustomClassic Chat", menu)
     threading.Thread(target=icon.run, daemon=True).start()
     return icon
 
@@ -968,9 +968,9 @@ class ChatPanel:
         self.repeat_id = None
         self.user_hidden = False
         self.line = (opts["box"] or {}).get("line") or 24.0
-        self.msgs = overlay.Overlay("Maple Chat", 40, 40, 400, 100, click_through=False)
+        self.msgs = overlay.Overlay("CustomClassic Chat", 40, 40, 400, 100, click_through=False)
         self.root = self.msgs.root
-        self.strip = overlay.Overlay("Maple Chat tabs", 40, 20, 400, 20, master=self.root, click_through=False)
+        self.strip = overlay.Overlay("CustomClassic Chat tabs", 40, 20, 400, 20, master=self.root, click_through=False)
         for w in (self.msgs, self.strip):
             w.canvas.configure(bg=self.opts["panel_bg"] or PANEL)
             w.canvas.bind("<MouseWheel>", self.on_wheel)
@@ -1052,7 +1052,7 @@ class ChatPanel:
             self.toast.root.destroy()
         p = self.panel_now()
         w = max(300, min(560, p["width"] - 20))
-        t = self.toast = self.overlay.Overlay("Maple Chat watch", p["left"] + 10, 0, w, 10, master=self.root,
+        t = self.toast = self.overlay.Overlay("CustomClassic Chat watch", p["left"] + 10, 0, w, 10, master=self.root,
                                               click_through=False)
         c = t.canvas
         c.configure(bg="#2a2208")
@@ -1451,7 +1451,7 @@ class ChatPanel:
         """A colour picker for the background (panel_bg) or one chat type's text."""
         from tkinter import colorchooser
         now = self.opts["panel_bg"] or PANEL if key == "panel_bg" else self.opts["colors"].get(key) or COLORS[key]
-        _, chosen = colorchooser.askcolor(color=now, parent=self.settings, title="Maple Chat colour")
+        _, chosen = colorchooser.askcolor(color=now, parent=self.settings, title="CustomClassic Chat colour")
         if not chosen:
             return
         if key == "panel_bg":
@@ -1471,7 +1471,7 @@ class ChatPanel:
         self.render()
 
     def icon_path(self) -> Path:
-        return save_icon(CACHE_DIR / "maple_chat.ico")
+        return save_icon(CACHE_DIR / "customclassic_chat.ico")
 
     def open_settings(self) -> None:
         """The settings window (settings_ui.py); a second open brings the first to the front."""
@@ -1610,14 +1610,14 @@ def print_replay(paths: list[Path]) -> None:
 
 def main(argv: list[str]) -> None:
     import overlay
-    if "--make-icon" in argv:  # for shortcuts: cache/maple_chat.ico
-        print(save_icon(CACHE_DIR / "maple_chat.ico"))
+    if "--make-icon" in argv:  # for shortcuts: cache/customclassic_chat.ico
+        print(save_icon(CACHE_DIR / "customclassic_chat.ico"))
         return
     if "--replay" in argv:
         print_replay([Path(a) for a in argv[argv.index("--replay") + 1:] if not a.startswith("--")])
         return
-    if not overlay.single_instance("MapleChatOverlay"):
-        message("Maple Chat is already running. Its blue speech-bubble icon is in the taskbar's notification "
+    if not overlay.single_instance("CustomClassicChatOverlay"):
+        message("CustomClassic Chat is already running. Its blue speech-bubble icon is in the taskbar's notification "
                 "area (bottom right, maybe behind the ^ arrow).")
         return
     overlay.dpi_aware()
@@ -1628,7 +1628,7 @@ def main(argv: list[str]) -> None:
 def message(text: str) -> None:
     """A plain Windows message box: the .exe has no console to print to."""
     import ctypes
-    ctypes.windll.user32.MessageBoxW(None, text, "Maple Chat", 0x40)  # MB_ICONINFORMATION
+    ctypes.windll.user32.MessageBoxW(None, text, "CustomClassic Chat", 0x40)  # MB_ICONINFORMATION
 
 
 if __name__ == "__main__":
@@ -1637,4 +1637,4 @@ if __name__ == "__main__":
     except Exception:  # without a console a crash would vanish: keep it in crash.log and say so
         import traceback
         (HERE / "crash.log").write_text(traceback.format_exc(), encoding="utf-8")
-        message(f"Maple Chat stopped because of an error. The details are in {HERE / 'crash.log'}.")
+        message(f"CustomClassic Chat stopped because of an error. The details are in {HERE / 'crash.log'}.")

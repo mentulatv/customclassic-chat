@@ -1,8 +1,8 @@
-"""Checks how well Maple Chat fits and reads the game at its current resolution and UI Size.
+"""Checks how well CustomClassic Chat fits and reads the game at its current resolution and UI Size.
 
 Run it with the game in front (python tests/fitcheck.py). It reads the game window once, the
-way Maple Chat does (text only, nothing saved), and prints the game's size, the chat box Maple
-Chat has saved, a fresh measurement of the chat box, and how many chat lines read cleanly.
+way CustomClassic Chat does (text only, nothing saved), and prints the game's size, the chat
+box it has saved, a fresh measurement of the chat box, and how many chat lines read cleanly.
 """
 import sys
 import time
@@ -10,7 +10,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-import maple_chat as mc  # noqa: E402
+import customclassic_chat as mc  # noqa: E402
 import reader as core  # noqa: E402
 
 

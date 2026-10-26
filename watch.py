@@ -1,4 +1,4 @@
-"""Maple Chat's watch list: words and items to look out for in megaphones.
+"""CustomClassic Chat's watch list: words and items to look out for in megaphones.
 
 An entry is a word or an item name. On its own it fires on any megaphone that mentions it
 (close spellings count, so "mushrnom" from a blurry read still finds "mushmom", unless the
@@ -8,7 +8,7 @@ what's sold or bought at what price. Item names and the shorthands chat uses for
 from the price site's /api/names (kept for an hour in cache/names.json, so it works offline
 from the last copy); prices are only ever the ones you type.
 
-Nothing here touches the game: it only looks at messages Maple Chat already read.
+Nothing here touches the game: it only looks at messages CustomClassic Chat already read.
 """
 
 from __future__ import annotations

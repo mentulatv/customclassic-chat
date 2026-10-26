@@ -1,5 +1,5 @@
 @echo off
-rem One-time setup: a private Python environment with what Maple Chat needs.
+rem One-time setup: a private Python environment with what CustomClassic Chat needs.
 cd /d "%~dp0"
 where py >nul 2>nul && (py -3 -m venv .venv) || (python -m venv .venv)
 if errorlevel 1 (

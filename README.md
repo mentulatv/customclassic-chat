@@ -1,10 +1,12 @@
-# Maple Chat
+# CustomClassic Chat
 
-A modern chat panel for **MapleStory Classic World** that sits exactly inside the game's own
-chat box and keeps the **megaphones out of your chat**. Map chat, whispers, party and buddy
+**A customizable chat and smega blocker for MapleStory Classic World.**
+
+A modern chat panel that sits exactly inside the game's own chat box and keeps the
+**megaphones out of your chat**. Map chat, whispers, party and buddy
 chat stay readable; megaphones get their own tab instead of flooding everything else.
 
-![Maple Chat over the game's chat box: the All tab with map chat, whispers, buddy and party chat, and dots on Mega and Watch](docs/chat-all.png)
+![CustomClassic Chat over the game's chat box: the All tab with map chat, whispers, buddy and party chat, and dots on Mega and Watch](docs/chat-all.png)
 
 ![The Mega tab with megaphones on their coloured bands, and a watch-list catch: a gold note above the chat and a star on the line](docs/chat-mega-watch.png)
 
@@ -31,7 +33,7 @@ chat stay readable; megaphones get their own tab instead of flooding everything 
 
 Windows 10/11 only. The game has to run **windowed** or **borderless**.
 
-> **Disclaimer.** Maple Chat is third-party software, not made or endorsed by Nexon. It
+> **Disclaimer.** CustomClassic Chat is third-party software, not made or endorsed by Nexon. It
 > interacts with the game only in the way considered safe for such tools: it **reads what's
 > on screen** with text recognition (OCR), much like a screen recorder or streaming software
 > sees the game. It never opens the game's process, never reads or changes game memory or
@@ -43,25 +45,25 @@ Windows 10/11 only. The game has to run **windowed** or **borderless**.
 
 ## Download
 
-**[⬇ MapleChat-win64.zip](https://github.com/mentulatv/maple-chat/releases/latest/download/MapleChat-win64.zip)**
+**[⬇ CustomClassicChat-win64.zip](https://github.com/mentulatv/customclassic-chat/releases/latest/download/CustomClassicChat-win64.zip)**
 (the latest version, about 110 MB; nothing to install)
 
-1. Unzip it anywhere, for example `Documents\MapleChat`.
-2. Start the game, then double-click **`MapleChat.exe`**. Maple Chat waits for the game, finds
+1. Unzip it anywhere, for example `Documents\CustomClassicChat`.
+2. Start the game, then double-click **`CustomClassicChat.exe`**. CustomClassic Chat waits for the game, finds
    its chat box and settles into it. Its blue speech-bubble icon appears in the taskbar's
    notification area (bottom right, maybe behind the **^** arrow).
 
 > Windows may say "Windows protected your PC", because the program isn't code-signed.
 > Click **More info → Run anyway**.
 
-Want to look around first? **`Maple Chat demo.bat`** shows made-up messages without reading
+Want to look around first? **`CustomClassic Chat demo.bat`** shows made-up messages without reading
 anything. To update, unzip a newer version over the old folder: your settings and chat history
 (`chat.json`, `chat_history.jsonl`) stay.
 
 **Game settings:** any resolution and **UI Size** work; **1280×720 or larger** is recommended,
 since smaller windows make the chat text tiny to read. Run the game **windowed**: an overlay
 can't draw over a fullscreen game, so in the "(Full Screen)" resolutions the panel may not show.
-Change the UI Size or resolution and Maple Chat fits itself again within a few seconds.
+Change the UI Size or resolution and CustomClassic Chat fits itself again within a few seconds.
 
 ### Running from source
 
@@ -111,7 +113,7 @@ Right-click the tray icon → **Settings…**. Changes apply right away and are 
 
 - Text size (or match the game's), how see-through ◐ makes it, the panel's opacity
 - Position: on the game's chat, or **unlocked** to go anywhere, and **Reset position**
-- Time stamps: with seconds, without, or off. They come from Maple Chat's own clock.
+- Time stamps: with seconds, without, or off. They come from CustomClassic Chat's own clock.
 - How many hours of history to keep, or forever
 - Colours of the background and of each chat type, and **Reset to default colours**
 - Your character names, so their name tags behind the chat are left out
@@ -131,7 +133,7 @@ Right-click the tray icon → **Settings…**. Changes apply right away and are 
 Settings → tick **Twitch chat from the channel**, type the channel's name (or paste its
 twitch.tv link) and press **Use**. Its chat shows in a **Twitch** tab, each chatter in their
 own name colour, and in All too if you tick **Show it in All too**. The custom tab can show it
-as well. Maple Chat reads the chat as a guest, the way anyone can watch a channel's chat
+as well. CustomClassic Chat reads the chat as a guest, the way anyone can watch a channel's chat
 without logging in: no account, key or password, and it never writes in the chat.
 
 ## Watch list
@@ -155,14 +157,14 @@ chime or pop-up off.
 
 Item names (the game's own) and their shorthands come from the
 [Maple Price Index](https://mapleprice.mentula.tv); no prices come with them, the only prices
-are the ones you type. Maple Chat downloads the list once an hour and keeps a copy in
+are the ones you type. CustomClassic Chat downloads the list once an hour and keeps a copy in
 `cache/names.json`, so it still works offline.
-That download (and, if you opt in, the Twitch chat you chose) is the only thing Maple Chat
+That download (and, if you opt in, the Twitch chat you chose) is the only thing CustomClassic Chat
 fetches. Your game chat never leaves your PC.
 
 ## How it works
 
-About once a second, Maple Chat asks Windows for a picture of the game window through
+About once a second, CustomClassic Chat asks Windows for a picture of the game window through
 Windows Graphics Capture (the same way OBS's window capture works) and reads the chat lines
 with [RapidOCR](https://github.com/RapidAI/RapidOCR). Because it reads the game window itself,
 covering the game's chat doesn't stop it from reading. Each line's colours tell the chat types
@@ -179,7 +181,7 @@ asked for; the game's process is never opened.
 
 | File | |
 |---|---|
-| `maple_chat.py` | the panel, tabs and the reading loop |
+| `customclassic_chat.py` | the panel, tabs and the reading loop |
 | `settings_ui.py` | the settings window |
 | `twitch_chat.py` | Twitch chat, read as a guest |
 | `reader.py` | text recognition and chat colours |
@@ -203,13 +205,13 @@ Chat colours were measured on the Windia world. If a chat type shows in the wron
 - **Odd words in the chat:** see "Your character names" in Settings. Send a screenshot in an
   issue for anything else.
 
-Try changes without the game: `python maple_chat.py --replay screenshot.png` prints which tab
+Try changes without the game: `python customclassic_chat.py --replay screenshot.png` prints which tab
 each chat line of a saved screenshot lands in. Tests: `python -m pytest`.
 
 ## Roadmap
 
 - **Discord channel** chat in its own tab (opt-in, like Twitch)
-- **Chatting back**: logging in with Twitch or Discord to write in those chats from Maple Chat
+- **Chatting back**: logging in with Twitch or Discord to write in those chats from CustomClassic Chat
 
 ## License
 

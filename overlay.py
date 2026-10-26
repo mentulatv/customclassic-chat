@@ -1,4 +1,4 @@
-"""Click-through, always-on-top windows on top of the game (deal alerts, Maple Chat).
+"""Click-through, always-on-top windows on top of the game (deal alerts, CustomClassic Chat).
 
 A borderless Tk window whose KEY_COLOR pixels are see-through, with WS_EX_TRANSPARENT so
 every click lands on the window below, re-raised every 2 s because borderless games push

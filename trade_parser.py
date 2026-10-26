@@ -10,7 +10,7 @@ becomes three observations:
     sell  "Gloves Attack Scroll: Intermediate"     3,500,000 ask (each)
     buy   "ilbis"                                  20,000,000 bid
 
-Item text is *not* resolved here; Maple Chat's watch list (watch.py) maps it onto the
+Item text is *not* resolved here; CustomClassic Chat's watch list (watch.py) maps it onto the
 price site's item names. This is the Maple Price Index server's parser, copied as is.
 The parser is deliberately forgiving about OCR noise and slang, and conservative
 about what counts as a price (a bare "5" is never a price; "5m" is).
