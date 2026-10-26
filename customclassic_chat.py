@@ -16,7 +16,7 @@ See-through: clicking ◐ on the tab strip makes the messages 90% see-through an
 through, so the game's own chat shows and can be clicked; clicking it again makes them solid.
 
     start.bat                   (or: pythonw customclassic_chat.py)
-    Ctrl+Alt+F5   adjust: drag to move, drag the bottom-right corner to resize; press again to save
+    Ctrl+Alt+F5   adjust: drag to move, drag any edge or corner to resize; press again to save
     Ctrl+Alt+F3   reset position: back on the game's chat box, fitted again
     Ctrl+Alt+F6   hide / show
     Ctrl+Alt+F7   quit
