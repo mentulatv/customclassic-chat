@@ -89,6 +89,10 @@ Right-click the tray icon → **Settings…**. Changes apply right away and are 
 - Colours of the background and of each chat type, and **Reset to default colours**
 - Your character names, so their name tags behind the chat are left out
 - Whether the game's system messages show (out of MP, shop closed, play time…)
+- **Lines padded with spacers** (`S> claw 60 @@@@@@@@@@@@`), which crowded maps fill the chat
+  with: leave them out by what they're about, with a box each for **buying and selling**,
+  **party quests and parties** (LF KPQ, need 2 more) and everything else. All three are left
+  out to start with. Left-out lines are kept, so unticking a box brings them back.
 - **A tab of your own:** its name, and which of map chat, whispers, party, buddy/guild,
   megaphones, system messages and watch-list catches it shows (whispers, party and buddy
   to start with). Untick it to hide the tab.

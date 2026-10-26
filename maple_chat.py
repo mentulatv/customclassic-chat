@@ -54,6 +54,8 @@ DEFAULTS = {
     "see_through": False,     # ◐ clicked on: the messages see-through and click-through until clicked off
     "peek_alpha": 0.1,        # how opaque they are then: 0.1 is 90% see-through
     "whisper_sound": True, "volume": 0.4,
+    # map chat and megaphones padded with spacers (@@@@@@) to fill the chat, left out by what they're about
+    "hide_padded": ["trade", "party", "other"],
     "system_messages": True,  # the game's own notes in All (out of MP, shop closed, play time); False hides them
     "watch": [],              # the watch list: words and items to look out for in megaphones (see watch.py)
     "watch_map": False,       # also look in map chat, not only megaphones
@@ -155,6 +157,38 @@ def trim_scene(lines, pitch: float) -> list:
 def _garbled(text: str) -> bool:
     words = re.findall(r"[^\W_]+", text)
     return len(words) >= 3 and sum(len(w) == 1 for w in words) / len(words) >= 0.4  # stray single letters
+
+
+SPACER_KINDS = {"map", "other", "mega"}  # where crowded maps get lines padded out to fill the chat
+
+
+def padded(body: str) -> bool:
+    """A line padded with spacers to take up more of the chat ("...scroll@@@@@@@@@@@@"). Text
+    recognition reads a row of @ partly as Q or O, so a long run of one symbol counts, and so does
+    a long word of at most two characters with a symbol among them ("@QQQ@QQQQ"), or of one
+    character only. A drawn-out word ("cashhhhhhhh") doesn't."""
+    if re.search(r"([^\w\s])\1{5,}", body):
+        return True
+    for word in body.split():
+        if len(word) >= 8 and (len(set(word)) == 1 or (len(set(word)) <= 2 and re.search(r"[^\w]", word))):
+            return True
+    return False
+
+
+PARTY_AD = re.compile(r"(?i)\b(?:[a-z]?pq|lf[gm]?\d*|party|pt|need\s*\d*\s*more|join|recruit\w*|leech\w*|"
+                      r"carry|exp\s*share|boss\s*run|zak(?:um)?\s*run|\d\s*/\s*6)\b")
+TRADE_AD = re.compile(r"(?i)(?:\b[sbt]\s*>|\bwt[sbt]\b|\bsell\w*|\bbuy\w*|\bc\s*/\s*o\b|\b\d+(?:[.,]\d+)?\s*(?:k|m|mil|b)\b)")
+PADDED_KINDS = [("trade", "Buying and selling"), ("party", "Party quests and parties"), ("other", "Everything else")]
+
+
+def padded_kind(body: str) -> str:
+    """What a padded line is about: "trade" (buying or selling: S>, B>, a price), "party"
+    (party quests and parties: LF KPQ, need 2 more) or "other". A party ad wins unless it also
+    buys or sells (a price alone can be a PQ's fee)."""
+    marker = re.search(r"(?i)\b[sbt]\s*>|\bwt[sbt]\b|\bsell|\bbuy", body)
+    if PARTY_AD.search(body) and not marker:
+        return "party"
+    return "trade" if TRADE_AD.search(body) else ("party" if PARTY_AD.search(body) else "other")
 
 
 def clean_body(kind: str, body: str, ignore: list[str]) -> str:
@@ -368,6 +402,7 @@ class ChatLog:
         self.tabs, self.tab, self.unread = [], "All", {}
         self.set_tabs(tabs or TABS, tab)
         self.hidden: set[str] = set()  # kinds not shown (kept, so showing them again brings them back)
+        self.hide_padded: set[str] = set()  # lines padded with spacers left out, by what they're about (kept too)
 
     def set_tabs(self, tabs: list, tab: str | None = None) -> None:
         """New tabs (the custom tab changed): unread marks kept where the tab still exists."""
@@ -381,8 +416,8 @@ class ChatLog:
 
     def add(self, msg: dict) -> None:
         self.messages.append(msg)
-        if msg["kind"] == "status" or msg["kind"] in self.hidden:  # nothing to miss
-            return
+        if msg["kind"] == "status" or msg["kind"] in self.hidden or msg.get("padded") in self.hide_padded:
+            return  # nothing to miss
         showing = self.kinds()
         for name, kinds in self.tabs:
             if name == self.tab or not shows(kinds, msg):
@@ -396,7 +431,7 @@ class ChatLog:
 
     def visible(self) -> list[dict]:
         kinds = self.kinds() - self.hidden
-        return [m for m in self.messages if shows(kinds, m)]
+        return [m for m in self.messages if shows(kinds, m) and m.get("padded") not in self.hide_padded]
 
 
 # ------------------------------------------------------------------ where the panel goes
@@ -873,6 +908,9 @@ class ChatPanel:
         self.events: queue.Queue = queue.Queue()
         self.log = ChatLog(opts["history"], opts["tab"], tabs_for(opts["custom_tab"]))
         self.log.hidden = set() if opts["system_messages"] else {"system"}
+        if not isinstance(opts["hide_padded"], list):  # an on/off from before the kinds were told apart
+            opts["hide_padded"] = [k for k, _ in PADDED_KINDS] if opts["hide_padded"] else []
+        self.log.hide_padded = set(opts["hide_padded"])
         if not demo:  # the chat from earlier runs, within the kept hours
             now = time.time()
             prune_history(HISTORY_FILE, opts["keep_hours"], now)
@@ -1103,7 +1141,10 @@ class ChatPanel:
                     print(time.strftime("%H:%M:%S"), kind, f"{data['kind']:>7} {line_text(data)}" if kind == "msg" else data,
                           flush=True)
                 if kind == "msg":
-                    self.watched(data)
+                    if data["kind"] in SPACER_KINDS and padded(data["body"]):
+                        data["padded"] = padded_kind(data["body"])
+                    if data.get("padded") not in self.log.hide_padded:  # left out: no alerts either
+                        self.watched(data)
                     self.log.add(data)
                     if not self.demo:
                         save_message(HISTORY_FILE, data)
@@ -1496,6 +1537,20 @@ class ChatPanel:
         tk.Checkbutton(win, text="Show the game's system messages (out of MP, shop closed, play time…)",
                        variable=system, command=set_system, selectcolor=TAB, activebackground=PANEL,
                        activeforeground=INK, **look).pack(anchor="w", pady=(12, 0))
+        tk.Label(win, text="Leave out lines padded with spacers to fill the chat (@@@@@@):", anchor="w",
+                 **look).pack(fill="x")
+        row = tk.Frame(win, bg=PANEL)
+        row.pack(anchor="w")
+        spacers = {k: tk.BooleanVar(value=k in (self.opts["hide_padded"] or [])) for k, _ in PADDED_KINDS}
+
+        def set_spacers():
+            chosen = [k for k, _ in PADDED_KINDS if spacers[k].get()]
+            self.log.hide_padded = set(chosen)
+            self.scroll = 0
+            self.set_opt("hide_padded", chosen)
+        for k, label in PADDED_KINDS:
+            tk.Checkbutton(row, text=label, variable=spacers[k], command=set_spacers, selectcolor=TAB,
+                           activebackground=PANEL, activeforeground=INK, **look).pack(side="left", padx=(0, 10))
 
         sound = tk.BooleanVar(value=self.opts["whisper_sound"])
 
@@ -1754,8 +1809,15 @@ def print_replay(paths: list[Path]) -> None:
                 b = found[0]
                 top = int(img.height * 0.35) + b["top"]
                 img = img.crop((b["left"], top, b["left"] + b["width"], top + b["height"]))
-        pitch = found[1] if found else 16.0  # a crop of the chat lines as saved: the game's own at 1080p
-        lines = core.merge_wrapped(trim_scene(reader.read(img), pitch), img.height, img.width)
+        read = reader.read(img)
+        pitch = found[1] if found else 16.0
+        stamps = [ln for ln in read if core.TIMESTAMP.match(ln.text)]
+        if not found and len(stamps) >= 2:  # a crop of the chat as saved: start it at the time stamps, as live
+            tops = sorted(ln.top for ln in stamps)
+            pitch = float(sorted(b - a for a, b in zip(tops, tops[1:]))[(len(tops) - 1) // 2])
+            img = img.crop((max(0, min(ln.left for ln in stamps) - 4), 0, img.width, img.height))
+            read = reader.read(img)
+        lines = core.merge_wrapped(trim_scene(read, pitch), img.height, img.width)
         print(f"{p.name}:")
         for ln in lines:
             print(f"  {kind_of(ln) or 'left out':>8}  [{ln.source}{', band' if ln.band else ''}] {ln.text}")

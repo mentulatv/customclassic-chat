@@ -304,3 +304,29 @@ def test_an_unlocked_panel_lost_off_screen_comes_back():
     back = mc.rescued({"left": 5000, "top": -900, "width": 600, "height": 200}, game)
     assert back == {"left": 660, "top": 440, "width": 600, "height": 200}
     assert mc.rescued({"left": 0, "top": 0, "width": 4000, "height": 3000}, game)["width"] == 1920  # never bigger
+
+
+def test_lines_padded_with_spacers():
+    assert mc.padded("B> all nx 10k S> 60% str earring scroll@@@@@@@@@@@@ @@@@@@@@@@@@@@@@Q@@")
+    assert mc.padded("S> claw 60 @QQQ@QQQQQQQQQQQQQQ")  # the @ row as text recognition reads it
+    assert mc.padded("S> zak helm ~~~~~~~~~~ pm me") and mc.padded("B> wg QQQQQQQQQQ")
+    assert not mc.padded("S>2Crit WG 170K, ne ed cashhhhhhhhhh")  # a drawn-out word
+    assert not mc.padded("B> white label ring 800K buy bulks !!! pm me...")
+    assert not mc.padded("hahahahaha gl")
+    # trades and party ads can be left out apart
+    assert mc.padded_kind("B> all nx 10k S> 60% str earring scroll@@@@") == "trade"
+    assert mc.padded_kind("LF KPQ 2/6 need 2 more @@@@@@@@") == "party"
+    assert mc.padded_kind("lpq lf1 mage @@@@@@") == "party"
+    assert mc.padded_kind("selling zhelm 30m, also LF zak run ~~~~~~") == "trade"
+    assert mc.padded_kind("KoM guild recruiting @@@@@@") == "party"
+    assert mc.padded_kind("hello everyone @@@@@@@@") == "other"
+    log = mc.ChatLog()
+    log.hide_padded = {"party"}
+    log.add({**msg("map", "Forage"), "padded": "trade"})
+    log.add({**msg("map", "Kpqer"), "padded": "party"})
+    log.add(msg("map", "Njoyer"))
+    assert [m["name"] for m in log.visible()] == ["Forage", "Njoyer"]
+    log.hide_padded = {"trade", "party"}
+    assert [m["name"] for m in log.visible()] == ["Njoyer"]
+    log.hide_padded = set()  # shown again: they were kept
+    assert [m["name"] for m in log.visible()] == ["Forage", "Kpqer", "Njoyer"]
