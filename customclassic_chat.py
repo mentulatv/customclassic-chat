@@ -10,7 +10,7 @@ How it reads: Windows hands over pictures of the game window itself (Windows Gra
 Capture, as OBS's window capture uses), so the panel can cover the game's chat and still read
 it; the chat lines are read with text recognition (reader.py). The game window is
 found by its title: its process is never opened and nothing is sent to the game. Nothing
-leaves this PC. The panel hides while the game isn't the active window.
+leaves this PC. The panel stays up while the game is open, and hides while it's minimised.
 
 See-through: clicking ◐ on the tab strip makes the messages 90% see-through and lets clicks
 through, so the game's own chat shows and can be clicked; clicking it again makes them solid.
@@ -628,15 +628,6 @@ def game_geometry() -> dict | None:
         ctypes.windll.user32.GetWindowRect(wt.HWND(win["hwnd"]), ctypes.byref(r))  # DWMWA_EXTENDED_FRAME_BOUNDS failed
     return {"hwnd": win["hwnd"], "client": {k: win[k] for k in ("left", "top", "width", "height")},
             "ox": win["left"] - r.left, "oy": win["top"] - r.top}
-
-
-def foreground_root() -> int:
-    import ctypes
-    u32 = ctypes.windll.user32
-    u32.GetForegroundWindow.restype = ctypes.c_void_p
-    u32.GetAncestor.restype = ctypes.c_void_p
-    fg = u32.GetForegroundWindow()
-    return u32.GetAncestor(ctypes.c_void_p(fg), 2) or 0 if fg else 0
 
 
 class GameCapture:
@@ -1760,7 +1751,7 @@ class ChatPanel(ChatView):
 
     def follow(self) -> None:
         """Keep the panel on the game's chat box (or where it was put, when unlocked), the extra
-        windows where they were put, and show them all only while the game is in front."""
+        windows where they were put, and show them all while the game's window is open (not minimised)."""
         unlocked = self.opts["unlocked"]
         if unlocked and not self.msgs.edit and not self.grip:
             self.place(self.free_rect())
@@ -1783,14 +1774,14 @@ class ChatPanel(ChatView):
                 if reason and not self.explained:
                     self.explained = True
                     self.explain(reason)
-            ours = set().union(self.hwnds, *(w.hwnds for w in self.windows))
-            front = bool(game) and foreground_root() in ({game["hwnd"]} | ours)
+            # shown as long as the game's window is open, in front or not; minimised to the taskbar
+            # (no game window found then), everything hides
+            up = bool(game) or self.always_show
             # unlocked, it isn't over the game's chat: nothing there to step aside for
-            visible = (bool((front or self.always_show) and (rect or unlocked)) and not self.user_hidden
-                       and not (self.covered and not unlocked))
+            visible = bool(up and (rect or unlocked)) and not self.user_hidden and not (self.covered and not unlocked)
             self.show(visible)
             for w in self.windows:  # a split goes with the panel; a window is never over the game's chat
-                w.show(visible if w.docked else (front or self.always_show) and not self.user_hidden)
+                w.show(visible if w.docked else up and not self.user_hidden)
         self.root.after(300, self.follow)
 
     def toggle_see_through(self) -> None:

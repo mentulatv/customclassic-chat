@@ -20,7 +20,8 @@ chat stay readable; megaphones get their own tab instead of flooding everything 
 - **Fits the game's chat box by itself** at any resolution or Windows scaling, follows the
   window when it moves or resizes, and follows the chat when you make it taller. It never
   covers the typing bar or the chat-target button, and it steps aside when the game shows
-  a party invite or trade request over the chat.
+  a party invite or trade request over the chat. It stays up while the game is open, even
+  behind other windows, and hides while the game is minimised.
 - **Scrolls like the game's chat**, with its own scrollbar lying over the game's.
 - **Chat history** is kept between restarts: 12 hours by default, or forever.
 - **Watch list:** a chime and a pop-up when a megaphone mentions something you're after
