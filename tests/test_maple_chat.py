@@ -1,0 +1,282 @@
+import sys
+from pathlib import Path
+from types import SimpleNamespace
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+import maple_chat as mc  # noqa: E402
+from reader import Line  # noqa: E402
+
+
+def line(text, source="general", band=False):
+    return SimpleNamespace(text=text, source=source, band=band)
+
+
+def test_parse_chat_lines():
+    assert mc.parse("[21:16] Rowan : e") == {"name": "Rowan", "body": "e", "sep": ":", "time": "21:16"}
+    assert mc.parse("[21: 15]Nimbi<< hi there")["sep"] == "<<"
+    assert mc.parse("[21:16j Bob1 : yo")["name"] == "Bob1"  # OCR read ] as j
+    assert mc.parse("16 : 39]Bramble CH22 : B>Gloves Attack 60% 750K", loose=True)["name"] == "Bramble"  # [ lost
+    assert mc.parse("16 : 39]Bramble CH22 : B>Gloves", loose=True)["time"] == "16:39"
+    assert mc.parse("[12:01][Beginner] Kim : hello")["name"] == "Kim"  # a medal before the name
+    assert mc.parse("Please beware of scams") is None and mc.parse("[21:16] Rowan :") is None
+    # a megaphone's channel badge sits between the name and the colon
+    assert mc.parse("[21:17]Tarvin CH22 : S> 60% earring INT") is None
+    assert mc.parse("[21:17]Tarvin CH22 : S> 60% earring INT", loose=True)["name"] == "Tarvin"
+
+
+def test_what_goes_where():
+    assert mc.kind_of(line("x", "super_megaphone", band=True)) == "mega"
+    assert mc.kind_of(line("x", "unknown", band=True)) == "mega"  # unknown colours on a band
+    # your own map chat over a plain stretch of scenery reads as a band: its white text decides
+    assert mc.kind_of(line("[17:31] Hollo : test", "general", band=True)) == "map"
+    assert mc.kind_of(line("[Notice] Please beware of scams", "notice")) is None
+    assert [mc.kind_of(line("x", s)) for s in ("whisper", "buddy_guild", "party", "general", "unknown")] == \
+        ["whisper", "buddy", "party", "map", "other"]
+
+
+def test_new_messages_only_and_whisper_direction():
+    d = mc.Dedupe()
+    frame = [line("[21:16] Rowan : e"), line("[21:17]Tarvin CH22 : S> 60% earring INT 100k", "super_megaphone", True),
+             line("[21:18]Nimbi>> are you selling?", "whisper"), line("[21:18]Nimbi<< yes 100k", "whisper")]
+    msgs = mc.messages_from(frame, d, 1000.0)
+    assert [(m["kind"], m["name"], m["to"]) for m in msgs] == [
+        ("map", "Rowan", None), ("mega", "Tarvin", None), ("whisper", "Nimbi", False), ("whisper", "Nimbi", True)]
+    assert mc.line_text(msgs[2]).endswith("From Nimbi : are you selling?")
+    # the next read shows the same lines, one read a little differently: only the new one counts
+    again = [line("[21:16] Rowan : e"), line("[21:18]Nimbi>> are you se1ling?", "whisper"), line("[21:19] Kim : hi all")]
+    assert [m["name"] for m in mc.messages_from(again, d, 1001.0)] == ["Kim"]
+
+
+def msg(kind, name="X"):
+    return {"kind": kind, "name": name, "body": "hi", "time": "17:00", "at": 0, "to": None}
+
+
+def test_tabs_and_red_dots():
+    log = mc.ChatLog()
+    for k in ("map", "mega", "whisper", "party"):
+        log.add(msg(k))
+    # on All everything but megaphones shows: only Mega, holding what All leaves out, gets a dot
+    assert [m["kind"] for m in log.visible()] == ["map", "whisper", "party"]
+    assert log.unread == {"All": False, "Whisper": False, "Party": False, "Buddy": False, "Mega": True, "Watch": False}
+    log.select("Whisper")
+    log.add(msg("map"))
+    log.add(msg("buddy"))
+    log.add(msg("whisper"))
+    assert log.unread == {"All": True, "Whisper": False, "Party": False, "Buddy": True, "Mega": True, "Watch": False}
+    log.select("Buddy")
+    assert not log.unread["Buddy"] and log.unread["All"] and [m["kind"] for m in log.visible()] == ["buddy"]
+    log.select("Mega")
+    assert [m["kind"] for m in log.visible()] == ["mega"]
+    # what the watch list caught: a gold dot on Watch, and only those lines there
+    log.add({**msg("mega", "Pebbles"), "watch": ["mentions mushmom"]})
+    assert log.unread["Watch"]
+    log.select("Watch")
+    assert [m["name"] for m in log.visible()] == ["Pebbles"] and not log.unread["Watch"]
+
+
+def test_panel_follows_the_game_window():
+    client = {"left": 0, "top": 0, "width": 2560, "height": 1440}
+    box = {"left": 481, "top": 1128, "width": 1086, "height": 103}
+    rel = mc.to_relative(box, 25.0, client)
+    assert mc.from_relative(rel, client) == box
+    moved = dict(client, left=100, top=50)
+    assert mc.from_relative(rel, moved) == dict(box, left=581, top=1178)
+    assert mc.from_relative(rel, dict(client, height=1080)) is None  # resized: fit again
+    assert mc.inside(500, 1150, box) and not mc.inside(500, 1100, box)
+    assert mc.strip_height(25.0) == 21
+
+
+def test_panel_grows_upward_and_follows_a_resized_game_chat():
+    read = {"left": 485, "top": 1161, "width": 1131, "height": 151}
+    # the ≡ grip makes it taller from the bottom up, like the game's chat; never smaller than the game's chat
+    assert mc.panel_rect(read, 80) == {"left": 485, "top": 1081, "width": 1131, "height": 231}
+    assert mc.panel_rect(read, -50) == read
+    from collections import deque
+    # the game's chat made taller: taken once two looks agree, keeping its bottom and width
+    looks = deque(maxlen=6)
+    taller = dict(read, top=1085, width=900)  # the lines found inside are shorter: the width stays
+    assert mc.resized(read, taller, 39.0, looks) is None
+    assert mc.resized(read, taller, 39.0, looks) == dict(read, top=1085, height=227)
+    # a top line that's seen one look and not the next doesn't make it flicker
+    looks = deque(maxlen=6)
+    flicker = [dict(read, top=1161 - 40 * (i % 2)) for i in range(6)]
+    results = [mc.resized(read, f, 39.0, looks) for f in flicker]
+    assert results[:3] == [None, None, None]
+    # made smaller: only once nearly all the recent looks agree (half a minute)
+    looks = deque([1161] * 6, maxlen=6)
+    smaller = dict(read, top=1200)
+    assert [mc.resized(read, smaller, 39.0, looks) for _ in range(4)] == [None] * 4
+    assert mc.resized(read, smaller, 39.0, looks) == dict(read, top=1200, height=112)
+
+
+def test_lines_keep_the_games_colours():
+    colors = {"super_megaphone": [119, 0, 66], "item_megaphone": [[9, 69, 76], [70, 39, 6]],
+              "whisper": [0, 255, 0], "buddy_guild": [255, 153, 0], "general": [255, 255, 255]}
+    backgrounds = {"item_megaphone": [[83, 208, 190], [224, 173, 1]], "super_megaphone": [206, 155, 177]}
+    seen = lambda src, color, bg=None, band=False: SimpleNamespace(source=src, color=color, bg=bg, band=band)  # noqa: E731
+    # a gold item megaphone stays gold, a teal one teal, whatever shade text recognition saw
+    assert mc.style_for(seen("item_megaphone", (72, 41, 9), (220, 170, 5), True), "mega", colors, backgrounds) == \
+        ("#462706", "#e0ad01")
+    assert mc.style_for(seen("item_megaphone", (10, 70, 70), (80, 200, 185), True), "mega", colors, backgrounds) == \
+        ("#09454c", "#53d0be")
+    assert mc.style_for(seen("super_megaphone", (120, 3, 60), (200, 150, 170), True), "mega", colors, backgrounds) == \
+        ("#770042", "#ce9bb1")
+    assert mc.style_for(seen("whisper", (10, 240, 20)), "whisper", colors, backgrounds) == ("#00ff00", None)
+    # map chat over plain scenery that looked like a band gets no band
+    assert mc.style_for(seen("general", (250, 250, 250), (90, 90, 90), True), "map", colors, backgrounds) == \
+        ("#ffffff", None)
+    # a type not measured yet (party) keeps the colour it was seen in
+    assert mc.style_for(seen("unknown", (255, 128, 192)), "other", colors, backgrounds) == ("#ff80c0", None)
+
+
+def test_lines_the_game_chat_shows():
+    assert mc.chat_lines({"height": 122}, 16.2) == 8 and mc.chat_lines({"height": 33}, 16.2) == 2
+    assert mc.chat_lines(None, 16.2) == 0
+    assert mc.DEFAULTS["min_lines"] == 3  # the ⚠ only for a minimised chat or one or two lines
+
+
+def test_line_pitch_and_where_the_scrollbar_starts():
+    # (top, bottom, left, right, text, confidence) as text recognition returns them: 16 px apart, 13 px tall,
+    # a wrapped line without a time stamp in the middle, and one line read as two boxes
+    rows = [(0, 13, 10, 300, "[16:40] A : hi", 0.9), (16, 29, 10, 300, "[16:41] B : a long one", 0.9),
+            (32, 45, 30, 200, "that wraps", 0.9), (48, 61, 10, 120, "[16:42] C :", 0.9), (48, 61, 130, 300, "yo", 0.9),
+            (64, 77, 10, 300, "[16:43] D : x", 0.9)]
+    assert mc.line_pitch(rows) == 16.0
+    assert mc.line_pitch([(0, 20, 0, 50, "one row", 0.9)]) == 25.0 and mc.line_pitch([]) == 24.0
+    import numpy as np
+    backgrounds = {"super_megaphone": [206, 155, 177], "item_megaphone": [[83, 208, 190], [224, 173, 1]]}
+    arr = np.zeros((80, 420, 3), dtype=np.uint8) + 40  # dark game scene
+    arr[16:30, 10:350] = (206, 155, 177)  # a super megaphone's pink band up to x=350, then the scrollbar
+    arr[20:26, 40:120:3] = (119, 0, 66)  # its text: thin strokes with band showing between
+    arr[64:78, 10:350] = (83, 208, 190)  # a teal item megaphone
+    arr[:, 350:364] = (235, 235, 240)  # the scrollbar's track
+    arr[:, 380:420] = (206, 155, 177)  # pink quick-slot buttons further right
+    arr[16:30, 160:200] = (250, 250, 250)  # a white channel badge on the pink line
+    arr[64:78, 220:300] = (250, 250, 250)  # and a long white item name on the teal one, ending at 300
+    # from the end of the longest line's text (x=300), every band line shows only its band up to the scrollbar
+    assert mc.band_right(arr, [7.5, 23.5, 40.5, 71.5], 10, 300, 420, backgrounds) == 350
+    assert mc.band_right(arr, [7.5, 40.5], 10, 300, 420, backgrounds) is None  # no band in view
+
+
+def test_system_lines_and_popups():
+    backgrounds = {"notice": [151, 66, 57]}
+    notice = lambda text, band=False, bg=None: SimpleNamespace(text=text, source="notice", band=band, bg=bg)  # noqa: E731
+    # read from your screenshot: the party line sits on the chat's dark shading, which looks like a band
+    assert mc.kind_of(notice("[16:59] You have left the party.", band=True, bg=(40, 32, 30)), backgrounds) == "system"
+    assert mc.kind_of(notice("[14:31][Friend] SoulSlayerX has logged in."), backgrounds) == "system"
+    assert mc.kind_of(notice("[14:31] [Notice] Please beware of scams"), backgrounds) is None
+    assert mc.kind_of(notice("X obtained a Gachapon prize", band=True, bg=(150, 68, 55)), backgrounds) is None
+    [m] = mc.messages_from([SimpleNamespace(text="[16:59] You have left the party.", source="notice", band=True,
+                                            bg=(40, 32, 30), color=(224, 188, 175))],
+                           mc.Dedupe(), 1000.0, ({"notice": [[255, 175, 175], [255, 255, 0]]}, backgrounds))
+    assert (m["kind"], m["name"], m["body"], m["fg"]) == ("system", "", "You have left the party.", "#ffafaf")
+    # the party invite pop-up's words, as text recognition merged them into the chat rows they cover
+    assert mc.POPUP.search(":00]BLOODSHED CHOS : [Blue Jewelry Boots] ch 8 good spaw Party invite from")
+    assert mc.POPUP.search("Trade request from Bob1") and mc.POPUP.search("Kim has invited you to a guild")
+    assert not mc.POPUP.search("[17:00] Bob1 : anyone want a party? invite me")
+
+
+def test_steps_aside_when_the_game_covers_its_chat():
+    w = mc.CoverWatch()
+    assert [w.covered(n) for n in (6, 7, 6, 6, 7)] == [False] * 5  # the usual: six or seven lines
+    assert w.covered(1) is False  # one read with few lines: could be anything
+    assert w.covered(0) is True  # two in a row: a party invite or a notice is over the chat
+    assert [w.covered(0) for _ in range(30)] == [True] * 30  # stays aside however long it's up
+    assert w.covered(6) is False  # lines back
+    assert mc.CoverWatch().covered(0) is False  # never saw lines yet: nothing to compare with
+
+
+def test_scrollbar_like_the_games():
+    # 100 messages, 7 in view, panel 120 px tall, arrow buttons 13 px: the track is 94 px
+    assert mc.thumb(100, 7, 0, 120, 13) == (13 + 94 - 13, 13)  # newest in view: thumb at the bottom (min size)
+    assert mc.thumb(100, 7, 93, 120, 13) == (13, 13)  # scrolled to the oldest: at the top
+    top, size = mc.thumb(10, 5, 0, 120, 13)
+    assert size == 47 and top == 13 + 47  # half the messages in view: half the track
+    assert mc.thumb(3, 7, 0, 120, 13) == (13, 94)  # everything fits: the thumb fills the track
+    # dragging the thumb to a place gives back the scroll position that puts it there
+    for scroll in (0, 10, 46, 93):
+        t, s = mc.thumb(100, 7, scroll, 120, 13)
+        assert abs(mc.scroll_at(t, 100, 7, 120, 13, s) - scroll) <= 2
+    assert mc.bar_width(16.2) == 18  # a guess when it couldn't be measured: 3 px divider + 15 px track at 1080p
+    # the game's scrollbar right of the bands, as on your screens: a dark divider, then the light track
+    import numpy as np
+    row = [191] * 8 + [64] * 3 + [215, 215, 219, 227] + [231] * 7 + [227, 219, 215, 215] + [100] * 20
+    arr = np.array([[[v, v, v] for v in row]] * 3, dtype=np.uint8)
+    assert mc.scrollbar_right(arr, [1], 8) == 8 + 3 + 15  # 1920x1080: 3 + 15 px
+    doubled = np.repeat(arr, 2, axis=1)  # 2560x1440: the game draws its interface twice the size
+    assert mc.scrollbar_right(doubled, [1], 16) == 16 + 6 + 30
+    assert mc.panel_rect({"left": 0, "top": 10, "width": 100, "height": 50}, 0, 18)["width"] == 118
+    # down the scrollbar column as on your 1080p screen: track, thumb, down arrow, then the frame line at 261
+    col = [(231, 231, 231)] * 89 + [(85, 136, 170)] * 23 + [(17, 85, 136)] * 9 + [(114, 128, 143)] + [(8, 8, 8)] * 2
+    arr = np.array([[c] for c in [(153, 153, 72)] * 134 + [(136, 153, 170)] + [(238, 238, 255)] * 12 + col],
+                   dtype=np.uint8)
+    assert mc.chat_bottom(arr, 0, 200, 16.2) == 147 + 89 + 23 + 9 + 1  # = 269 here: the first near-black row
+    assert mc.chat_bottom(arr[:250], 0, 200, 16.2) is None  # no frame line within reach
+
+
+def test_time_stamps_and_history(tmp_path):
+    import time as t
+    at = t.mktime((2026, 10, 26, 18, 16, 5, 0, 0, -1))
+    m = {"kind": "map", "name": "Hollo", "body": "JPT", "at": at, "to": None}
+    assert mc.line_text(m) == "[18:16:05] Hollo : JPT"
+    assert mc.line_text(m, "minutes") == "[18:16] Hollo : JPT"
+    assert mc.line_text(m, "off") == "Hollo : JPT"
+    path = tmp_path / "h.jsonl"
+    for hours_ago in (30, 13, 2, 0):
+        mc.save_message(path, dict(m, at=at - hours_ago * 3600, body=f"{hours_ago}h"))
+    assert [x["body"] for x in mc.load_history(path, 12, at)] == ["2h", "0h"]  # the default 12 hours
+    assert len(mc.load_history(path, 0, at)) == 4  # forever
+    mc.prune_history(path, 12, at)
+    assert [x["body"] for x in mc.load_history(path, 0, at)] == ["2h", "0h"]
+    log = mc.ChatLog()
+    log.add(dict(m, kind="mega"))
+    assert log.unread["Mega"]  # on All, megaphones aren't shown: Mega gets a red dot
+
+
+def test_icon():
+    img = mc.icon_image(32)
+    assert img.size == (32, 32) and img.getpixel((16, 16))[3] == 255
+
+
+def scene_line(text, parts, left=10, band=False, bg=None, color=(255, 255, 255)):
+    return Line(text, 0.95, 0, 16, left, max(q[1] for q in parts) if parts else 400, color, bg, band, "general",
+                parts=parts)
+
+
+def test_the_scene_behind_the_chat_is_left_out():
+    pitch = 16.0
+    rows = [
+        scene_line("[18:20] Pippa : hi man Snail", [(10, 150, 0, 16, "[18:20] Pippa : hi man"), (300, 340, 0, 16, "Snail")]),
+        scene_line("Hollo", [(220, 290, 0, 16, "Hollo")], left=220),  # a name tag mid-box
+        scene_line("prices", [(30, 70, 0, 16, "prices")], left=30),  # a wrapped line, indented
+        scene_line("[18:21] Pippa : gl 44512", [(10, 120, 0, 16, "[18:21] Pippa : gl"), (128, 200, -10, 30, "44512")]),
+    ]
+    kept = mc.trim_scene(rows, pitch)
+    assert [ln.text for ln in kept] == ["[18:20] Pippa : hi man", "prices", "[18:21] Pippa : gl"]
+
+
+def test_scene_words_read_into_messages():
+    assert mc.clean_body("system", "You don't have enough MP to use this skill.Snail", []) ==         "You don't have enough MP to use this skill."
+    assert mc.clean_body("system", "You cannot use that skill yet. Lv,6]Slime", []) == "You cannot use that skill yet."
+    assert mc.clean_body("system", "Please try again lat er. 17 e s  t", []) == "Please try again lat er."
+    assert mc.clean_body("system", "Use this skill. l7 e t s te e ae e e iat er.", []) == "Use this skill."
+    assert mc.clean_body("system", "You have left the party. It is a good day.", []).endswith("good day.")
+    assert mc.clean_body("map", "hi man Hollo", ["hollo"]) == "hi man"
+    assert mc.clean_body("map", "44512", []) == "" and mc.clean_body("map", "1", []) == "1"
+    assert mc.clean_body("mega", "S> lvl 30 claw 2m", []) == "S> lvl 30 claw 2m"
+    # with time stamps on, a line without one is the scene; your own chat still shows
+    d = mc.Dedupe()
+    got = mc.messages_from([line("[18:20] Pippa : hi Hollo"), line("Slime : 3"), line("[18:21] Hollo : gl")], d, 0.0,
+                           ignore=["Hollo"])
+    assert [(m["name"], m["body"]) for m in got] == [("Pippa", "hi"), ("Hollo", "gl")]
+
+
+def test_system_messages_can_be_hidden():
+    log = mc.ChatLog()
+    log.hidden = {"system"}
+    log.add(msg("system"))
+    log.add(msg("map"))
+    assert [m["kind"] for m in log.visible()] == ["map"]
+    log.hidden = set()  # shown again: the ones read meanwhile are back
+    assert [m["kind"] for m in log.visible()] == ["system", "map"]

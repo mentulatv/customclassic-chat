@@ -1,0 +1,163 @@
+# Maple Chat
+
+A modern chat panel for **MapleStory Classic World** that sits exactly inside the game's own
+chat box and keeps the **megaphones out of your chat**. Map chat, whispers, party and buddy
+chat stay readable; megaphones get their own tab instead of flooding everything else.
+
+- **Tabs** like modern MapleStory: All (everything but megaphones), Whisper, Party, Buddy, Mega
+  and Watch. A red dot marks a tab with messages you haven't seen.
+- **Looks like the game:** megaphones on their pink, teal or gold band, green whispers,
+  orange buddy chat, white map chat. Text size, colours, opacity and time stamps are adjustable.
+- **Fits the game's chat box by itself** at any resolution or Windows scaling, follows the
+  window when it moves or resizes, and follows the chat when you make it taller. It never
+  covers the typing bar or the chat-target button, and it steps aside when the game shows
+  a party invite or trade request over the chat.
+- **Scrolls like the game's chat**, with its own scrollbar lying over the game's.
+- **Chat history** is kept between restarts: 12 hours by default, or forever.
+- **Watch list:** a chime and a pop-up when a megaphone mentions something you're after
+  ("mushmom", "Work Gloves"). It can also check that someone is selling, that the price is
+  under a limit you set, or that it's well under the usual price.
+- **See-through toggle (◐):** the messages turn 90% see-through and clicks go to the game's
+  own chat underneath, until you click ◐ again.
+- **Leaves the scenery out:** the game's chat box is see-through, so monster name tags,
+  damage numbers and character names behind it are filtered out, not shown as chat.
+
+Windows 10/11 only. The game has to run **windowed** or **borderless**.
+
+> **Read this first.** Maple Chat is a third-party program that reads the game's screen.
+> Nexon's terms of service don't allow third-party programs, and using it is **at your own
+> risk**: your account could be banned. Maple Chat only looks at pixels of the game window.
+> It never opens the game's process, never reads game memory, files or network traffic, and
+> never sends any input to the game.
+
+---
+
+## Quick start
+
+1. Install **Python 3.11 or newer** from [python.org](https://www.python.org/downloads/)
+   (tick "Add python.exe to PATH").
+2. Download this repository (green **Code** button → **Download ZIP**) and unzip it anywhere.
+3. Double-click **`setup.bat`** once. It makes a private Python environment and installs
+   what Maple Chat needs (a few hundred MB, mostly the text-recognition model).
+4. Start the game, then double-click **`start.bat`**. Maple Chat waits for the game, finds
+   its chat box and settles into it. Its blue speech-bubble icon appears in the taskbar's
+   notification area (bottom right, maybe behind the **^** arrow).
+
+Want to look around first? `start.bat --demo` shows made-up messages without reading anything.
+
+## Using it
+
+**The tab row**
+
+| | |
+|---|---|
+| **≡** (left end) | Drag up or down to make the panel taller or shorter, like the game's chat. |
+| Tabs | Click to switch. A red dot means unread messages; a gold dot on Watch means your watch list caught something. |
+| **◐** (right end) | See-through: messages 90% see-through and click-through until clicked again. |
+| **⚠** (amber) | Only when the game's chat is minimised or shows one or two lines: megaphones arriving together may scroll away unread. Make the game's chat taller, or click ⚠ to hide it. |
+
+**Scrolling:** the arrows (hold to keep going), the track, dragging the thumb, or the mouse
+wheel. New messages don't pull you down while you're reading back.
+
+**Tray icon:** left click shows or hides the panel. Right click: Show / hide, Fit to the
+game's chat, Adjust position, See-through, Settings…, Quit.
+
+**Hotkeys**
+
+| Keys | Action |
+|---|---|
+| Ctrl+Alt+F5 | Adjust: drag to move, drag the bottom-right corner to resize, press again to save |
+| Ctrl+Alt+F3 | Fit to the game's chat box again |
+| Ctrl+Alt+F6 | Hide / show |
+| Ctrl+Alt+F7 | Quit |
+
+## Settings
+
+Right-click the tray icon → **Settings…**. Changes apply right away and are remembered.
+
+- Text size (or match the game's), how see-through ◐ makes it, the panel's opacity
+- Time stamps: with seconds, without, or off. They come from Maple Chat's own clock.
+- How many hours of history to keep, or forever
+- Colours of the background and of each chat type, and **Reset to default colours**
+- Your character names, so their name tags behind the chat are left out
+- Whether the game's system messages show (out of MP, shop closed, play time…)
+- The whisper chime
+- The watch list
+
+## Watch list
+
+Settings… → **Watch list** → **Add…**. Each entry is a word or an item name:
+
+- **A word** ("mushmom", "mano") fires on any megaphone that mentions it. Close spellings
+  count, because text recognition sometimes reads "mushmom" as "mushrnom". Tick "This exact
+  word only" to turn that off. Words under 5 letters always need the whole word.
+- **An item** ("Work Gloves") gets name suggestions as you type, along with its usual price
+  and its common shorthands ("wg"). You can then add conditions:
+  - someone is **selling** it (S>), not buying
+  - it costs **at most** a price you set (each, like `1.5m` or `400k`)
+  - it's **well under the usual price** (20% or more below the usual sale price)
+
+A hit plays a three-note chime, pops up a gold note above the chat for 12 seconds (click it
+to open the Watch tab), and marks the line with a gold ★. The same entry and the same player
+alert at most once every 10 minutes. You can also have it look in map chat, and turn the
+chime or pop-up off.
+
+Item names and usual prices come from the [Maple Price Index](https://mapleprice.mentula.tv),
+which builds them from [NiaMeowDB](https://meowdb.com) and
+[maplestory-classic.com](https://maplestory-classic.com) market data. Maple Chat downloads
+the list once an hour and keeps a copy in `cache/names.json`, so it still works offline.
+That download is the only thing Maple Chat fetches. Your chat never leaves your PC.
+
+## How it works
+
+About once a second, Maple Chat asks Windows for a picture of the game window through
+Windows Graphics Capture (the same way OBS's window capture works) and reads the chat lines
+with [RapidOCR](https://github.com/RapidAI/RapidOCR). Because it reads the game window itself,
+covering the game's chat doesn't stop it from reading. Each line's colours tell the chat types
+apart: megaphones sit on a coloured band, whispers are green, and so on.
+
+The chat box is measured in pixels: the line spacing from the text rows, the right edge where
+the megaphone bands meet the game's scrollbar, and the bottom from the frame line above the
+typing bar. That's why it fits at any resolution or scaling.
+
+The game window is found by its title ("MapleStory"). Only window titles and positions are
+asked for; the game's process is never opened.
+
+## Files
+
+| File | |
+|---|---|
+| `maple_chat.py` | the panel, tabs, settings and the reading loop |
+| `reader.py` | text recognition and chat colours |
+| `watch.py` | the watch list |
+| `trade_parser.py`, `data/` | reads prices in megaphones (from the Maple Price Index) |
+| `overlay.py` | the always-on-top overlay window and hotkeys |
+| `chat.json` | your settings (made on first run) |
+| `chat_history.jsonl` | the kept chat history (stays on your PC) |
+
+Chat colours were measured on the Windia world. If a chat type shows in the wrong tab, copy
+`config.example.toml` to `config.toml` and adjust the colours there.
+
+## If something's off
+
+- **Nothing shows up:** the game's chat box needs to show some lines. With the game in front,
+  press Ctrl+Alt+F3.
+- **It sits slightly wrong:** tray icon → Fit to the game's chat, or adjust it by hand with
+  Ctrl+Alt+F5.
+- **A yellow border around the game** (Windows 10): that's Windows showing a window is being
+  captured. Windows 11 hides it.
+- **Odd words in the chat:** see "Your character names" in Settings. Send a screenshot in an
+  issue for anything else.
+
+Try changes without the game: `python maple_chat.py --replay screenshot.png` prints which tab
+each chat line of a saved screenshot lands in. Tests: `python -m pytest`.
+
+## Roadmap
+
+- A **custom tab** where you pick which chat types it shows
+- **Twitch chat** in its own tab, for streamers
+- **Discord channel** chat in its own tab
+
+## License
+
+MIT, see [LICENSE](LICENSE). Not affiliated with Nexon. MapleStory is a trademark of Nexon.

@@ -1,0 +1,151 @@
+"""Click-through, always-on-top windows on top of the game (deal alerts, Maple Chat).
+
+A borderless Tk window whose KEY_COLOR pixels are see-through, with WS_EX_TRANSPARENT so
+every click lands on the window below, re-raised every 2 s because borderless games push
+themselves above other topmost windows. Global hotkeys arrive on a queue as
+("hotkey", id). In edit mode the window takes clicks, shows a frame and can be dragged.
+"""
+from __future__ import annotations
+
+import ctypes
+import queue
+import sys
+from ctypes import wintypes
+
+KEY_COLOR = "#010203"  # painted pixels of this colour are see-through
+EDIT_BG = "#20242c"
+
+user32 = ctypes.windll.user32 if sys.platform == "win32" else None
+GWL_EXSTYLE = -20
+WS_EX_LAYERED, WS_EX_TRANSPARENT, WS_EX_TOOLWINDOW = 0x00080000, 0x00000020, 0x00000080
+WS_EX_NOACTIVATE, WS_EX_TOPMOST = 0x08000000, 0x00000008
+HWND_TOPMOST = -1
+SWP_NOSIZE, SWP_NOMOVE, SWP_NOACTIVATE = 0x0001, 0x0002, 0x0010
+MOD_ALT, MOD_CONTROL, MOD_NOREPEAT = 0x0001, 0x0002, 0x4000
+WM_HOTKEY = 0x0312
+if user32:
+    user32.GetWindowLongW.restype = ctypes.c_long
+    user32.GetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int]
+    user32.SetWindowLongW.restype = ctypes.c_long
+    user32.SetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_long]
+    user32.GetAncestor.restype = wintypes.HWND
+    user32.GetAncestor.argtypes = [wintypes.HWND, ctypes.c_uint]
+    user32.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int,
+                                    ctypes.c_int, ctypes.c_int, ctypes.c_uint]
+
+
+def hotkey_thread(events: queue.Queue, keys: dict[int, int]) -> None:
+    """Ctrl+Alt+<key> for each {id: virtual key}; runs a message loop, so start it on a thread."""
+    for hk_id, vk in keys.items():
+        if not user32.RegisterHotKey(None, hk_id, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, vk):
+            events.put(("status", f"Ctrl+Alt+F{vk - 0x6F} is taken by another app"))
+    msg = wintypes.MSG()
+    while user32.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
+        if msg.message == WM_HOTKEY:
+            events.put(("hotkey", msg.wParam))
+
+
+def single_instance(name: str) -> bool:
+    ctypes.windll.kernel32.CreateMutexW(None, False, name)
+    return ctypes.windll.kernel32.GetLastError() != 183  # ERROR_ALREADY_EXISTS
+
+
+def dpi_aware() -> None:
+    try:
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)
+    except (AttributeError, OSError):
+        pass
+
+
+class Overlay:
+    """The window itself: a canvas to draw on, click-through until edit mode (or never, with
+    click_through=False: it then takes clicks but still never takes the keyboard from the game).
+    Pass master to make a second window of the same app."""
+
+    def __init__(self, title: str, x: int | None, y: int | None, width: int, height: int,
+                 master=None, click_through: bool = True):
+        import tkinter as tk
+        self.root = tk.Toplevel(master) if master is not None else tk.Tk()
+        self.root.title(title)
+        self.root.overrideredirect(True)
+        self.root.attributes("-topmost", True)
+        self.root.configure(bg=KEY_COLOR)
+        self.root.attributes("-transparentcolor", KEY_COLOR)
+        self.width, self.height = width, height
+        x = x if x is not None else self.root.winfo_screenwidth() - width - 24
+        y = y if y is not None else 120
+        self.root.geometry(f"{width}x{height}+{x}+{y}")
+        self.canvas = tk.Canvas(self.root, bg=KEY_COLOR, highlightthickness=0, bd=0)
+        self.canvas.pack(fill="both", expand=True)
+        self.canvas.bind("<ButtonPress-1>", self._press)
+        self.canvas.bind("<B1-Motion>", self._drag)
+        self.edit = self.hidden = False
+        self.through = click_through
+        self._grab = None
+        self.root.update_idletasks()
+        self.hwnd = user32.GetAncestor(self.root.winfo_id(), 2)  # GA_ROOT
+        self.click_through(click_through)
+        self.root.after(2000, self.keep_on_top)
+
+    def place(self, x: int, y: int, width: int, height: int) -> None:
+        if (x, y, width, height) != (self.root.winfo_x(), self.root.winfo_y(), self.width, self.height):
+            self.width, self.height = width, height
+            self.root.geometry(f"{width}x{height}+{x}+{y}")
+
+    def set_alpha(self, alpha: float) -> None:
+        self.root.attributes("-alpha", alpha)
+
+    def click_through(self, on: bool) -> None:
+        style = user32.GetWindowLongW(self.hwnd, GWL_EXSTYLE)
+        style |= WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TOPMOST
+        style = style | WS_EX_TRANSPARENT if on else style & ~WS_EX_TRANSPARENT
+        user32.SetWindowLongW(self.hwnd, GWL_EXSTYLE, style)
+        self.keep_on_top(again=False)
+
+    def keep_on_top(self, again: bool = True) -> None:
+        if not self.root.winfo_exists():  # closed (a pop-up note): stop
+            return
+        user32.SetWindowPos(self.hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE)
+        if again:
+            self.root.after(2000, self.keep_on_top)
+
+    def toggle_edit(self) -> bool:
+        """Edit mode on or off; True when it was just locked (time to save the position)."""
+        self.edit = not self.edit
+        self.click_through(self.through and not self.edit)
+        return not self.edit
+
+    def toggle_hidden(self) -> None:
+        self.show(self.hidden)
+
+    def show(self, visible: bool) -> None:
+        if visible == (not self.hidden):
+            return
+        self.hidden = not visible
+        if self.hidden:
+            self.root.withdraw()
+        else:
+            self.root.deiconify()
+            self.root.update_idletasks()
+            self.hwnd = user32.GetAncestor(self.root.winfo_id(), 2)
+            self.click_through(self.through and not self.edit)
+
+    def rect(self) -> tuple[int, int, int, int]:
+        return self.root.winfo_x(), self.root.winfo_y(), self.width, self.height
+
+    def clear(self, frame_text: str) -> None:
+        """Wipe the canvas; in edit mode draw the frame and a hint along the bottom."""
+        c = self.canvas
+        c.delete("all")
+        c.configure(bg=EDIT_BG if self.edit else KEY_COLOR)
+        if self.edit:
+            c.create_rectangle(1, 1, self.width - 2, self.height - 2, outline="#9db1d3", dash=(4, 3))
+            c.create_text(self.width // 2, self.height - 14, fill="#b0bfd9", font=("Verdana", 8), text=frame_text)
+
+    def _press(self, e) -> None:
+        if self.edit:
+            self._grab = (e.x_root - self.root.winfo_x(), e.y_root - self.root.winfo_y())
+
+    def _drag(self, e) -> None:
+        if self.edit and self._grab:
+            self.root.geometry(f"+{e.x_root - self._grab[0]}+{e.y_root - self._grab[1]}")

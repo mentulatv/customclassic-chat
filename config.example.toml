@@ -1,0 +1,22 @@
+# Optional: copy to config.toml to change how chat types are told apart. Without it, the
+# colours below (measured on the Windia world) are used. Colours are [red, green, blue];
+# a chat type can list several: [[r, g, b], [r, g, b]].
+
+# Text recognition reads enlarged text better. 2.5 suits the chat font at 1080p.
+# scale = 2.5
+# min_confidence = 0.55
+
+[colors]          # the colour of a line's text
+tolerance = 45    # how far off a colour may be and still count
+item_megaphone = [[9, 69, 76], [70, 39, 6]]
+super_megaphone = [119, 0, 66]
+buddy_guild = [255, 153, 0]       # orange
+whisper = [0, 255, 0]             # green
+notice = [[255, 175, 175], [255, 255, 0]]   # system messages: pink, yellow
+general = [255, 255, 255]         # map chat: white
+# party = [r, g, b]               # not measured yet
+
+[backgrounds]     # the band behind megaphone text
+item_megaphone = [[83, 208, 190], [224, 173, 1]]   # teal or gold
+super_megaphone = [206, 155, 177]                  # pink
+notice = [151, 66, 57]                             # red: gachapon announcements (left out)

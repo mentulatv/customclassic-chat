@@ -1,0 +1,16 @@
+# your own settings, chat and caches: they stay on your PC
+chat.json
+chat.json.tmp
+chat_history.jsonl
+chat_history.jsonl.tmp
+config.toml
+cache/
+.venv/
+__pycache__/
+.pytest_cache/
+build/
+dist/
+*.spec
+*.png
+*.jpg
+!docs/**

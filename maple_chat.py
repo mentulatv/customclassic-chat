@@ -1,0 +1,1624 @@
+"""Maple Chat: a modern chat panel over the game's own chat box, without the megaphones.
+
+It sits exactly inside the game's chat box (its tab strip is the box's top line) and shows the
+same chat sorted into tabs: All (everything but megaphones), Whisper, Party, Buddy and Mega
+(the megaphones, kept apart instead of lost). A red dot marks a tab with messages you haven't
+seen; on All you see everything else as it arrives. A received whisper plays a soft chime. It
+scrolls like the game's chat: arrows, a draggable thumb, the track and the mouse wheel.
+
+How it reads: Windows hands over pictures of the game window itself (Windows Graphics
+Capture, as OBS's window capture uses), so the panel can cover the game's chat and still read
+it; the chat lines are read with text recognition (reader.py). The game window is
+found by its title: its process is never opened and nothing is sent to the game. Nothing
+leaves this PC. The panel hides while the game isn't the active window.
+
+See-through: clicking ◐ on the tab strip makes the messages 90% see-through and lets clicks
+through, so the game's own chat shows and can be clicked; clicking it again makes them solid.
+
+    start.bat                   (or: pythonw maple_chat.py)
+    Ctrl+Alt+F5   adjust: drag to move, drag the bottom-right corner to resize; press again to save
+    Ctrl+Alt+F3   fit to the game's chat box again (after resizing the chat in the game)
+    Ctrl+Alt+F6   hide / show
+    Ctrl+Alt+F7   quit
+
+    python maple_chat.py --demo                       made-up messages, to try the tabs (reads nothing)
+    python maple_chat.py --replay shot1.png ...       read saved screenshots and print what goes where
+
+Settings: chat.json holds the panel's place (relative to the game window) and the options in DEFAULTS.
+"""
+from __future__ import annotations
+
+import json
+import queue
+import re
+import sys
+import threading
+import time
+from collections import deque
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+SETTINGS_FILE = HERE / "chat.json"
+CACHE_DIR = HERE / "cache"
+DEFAULTS = {
+    "interval_s": 0.7,        # seconds between reads of the chat
+    "font_px": None,          # message text size in pixels; None: sized from the game's chat lines
+    "min_lines": 3,           # fewer lines in the game's chat (minimised, one or two): megaphones arriving together
+                              # may scroll away unread, and a quiet ⚠ shows until clicked
+    "history": 20000,         # messages kept in memory at most
+    "keep_hours": 12,         # chat history kept between restarts, in hours; 0 keeps it forever
+    "timestamps": "seconds",  # "seconds" [18:16:05], "minutes" [18:16] or "off"
+    "opacity": 1.0,           # the panel's opacity when ◐ is off
+    "panel_bg": None,         # background colour; None: Maple Chat's dark blue
+    "colors": {},             # text colour per chat type (map, whisper, party, buddy, system, mega); empty: the game's
+    "see_through": False,     # ◐ clicked on: the messages see-through and click-through until clicked off
+    "peek_alpha": 0.1,        # how opaque they are then: 0.1 is 90% see-through
+    "whisper_sound": True, "volume": 0.4,
+    "system_messages": True,  # the game's own notes in All (out of MP, shop closed, play time); False hides them
+    "watch": [],              # the watch list: words and items to look out for in megaphones (see watch.py)
+    "watch_map": False,       # also look in map chat, not only megaphones
+    "watch_sound": True, "watch_popup": True,  # a hit chimes and pops up a note by the panel
+    "ignore_names": [],       # your character names: their name tags behind the chat aren't chat
+    "names_url": None,        # where item names and usual prices come from; None: the public price site
+    "tab": "All",
+    "box": None,              # the chat lines relative to the game window: dx, dy (from its bottom), w, h, line, cw, ch
+    "extra": 0,               # pixels the panel reaches above the game's chat (dragged with the ≡ grip)
+}
+MEGAPHONES = {"megaphone", "super_megaphone", "item_megaphone"}
+TABS = [("All", {"map", "whisper", "party", "buddy", "other", "system", "status"}), ("Whisper", {"whisper", "status"}),
+        ("Party", {"party", "status"}), ("Buddy", {"buddy", "status"}), ("Mega", {"mega", "status"}),
+        ("Watch", set())]  # Watch: the lines your watch list caught, whatever chat they came from
+COLORS = {"map": "#ffffff", "whisper": "#00ff00", "party": "#ff8fc7", "buddy": "#ff9900", "other": "#c8d2e4",
+          "mega": "#f2a7cf", "system": "#ffafaf", "status": "#ffc24b"}  # the game's own where measured; notes in amber
+# the game's own pop-ups that appear over the chat box: Maple Chat steps aside while one is up
+POPUP = re.compile(r"(?i)\b(?:party|guild|alliance|family)\s+invit\w*\s+from\b|\b(?:trade|friend|buddy)\s+request\s+from\b"
+                   r"|\binvited\s+you\b")
+PANEL, STRIP, TAB, TAB_ON, INK, SOFT, DOT = "#111827", "#0b1120", "#1c2740", "#2f5597", "#eef3fb", "#8f9db5", "#ff4b4b"
+WARN = "#ffc24b"
+GOLD = "#ffd24a"  # the watch list's star and dot
+SB_TRACK, SB_BUTTON, SB_ARROW, SB_THUMB, SB_EDGE = "#e3e8ef", "#a9c8ee", "#1f4f8f", "#8ea3c2", "#5b7fb4"  # as the game's
+FONT = "Verdana"
+HOTKEYS = {1: 0x74, 2: 0x75, 3: 0x76, 4: 0x72}  # Ctrl+Alt+F5 adjust, F6 hide, F7 quit, F3 fit again
+RECHECK_S = 5  # seconds between looks at whether the game's chat was resized
+HK_EDIT, HK_HIDE, HK_QUIT, HK_FIT = 1, 2, 3, 4
+
+# [21:16], and OCR's "[21:16j", "16 : 39]" (the [ lost)
+_STAMP = r"^[^\w\[({]{0,3}(?:(?:[\[({]\s?)?(?P<time>\d{1,2}\s?[:.;]\s?\d{2})\s?[\])}jlI|1]?)?\s*"
+_NAME = r"(?P<name>(?=[A-Za-z0-9]*[A-Za-z])[A-Za-z0-9]{2,13})"  # at least one letter: "16" of a lost "[16:39]" isn't one
+_MSG = re.compile(_STAMP + r"(?:\[[^\]]{1,25}\]\s*)?"                                       # a medal
+                  + _NAME + r"\s*(?P<sep><<|>>|«|»|[:;])\s?(?P<body>.*)$")
+_LOOSE = re.compile(_STAMP + _NAME + r"[^:;]{0,14}[:;]\s?(?P<body>.*)$")  # "Tarvin CH22 : S> ..."
+
+
+# ------------------------------------------------------------------ what goes where
+
+
+def parse(text: str, loose: bool = False) -> dict | None:
+    """{name, body, sep} of "[21:16] Rowan : hi" or "[21:15]Nimbi<< hi"; loose also takes a
+    megaphone's channel badge between the name and the colon. None for other text."""
+    m = _MSG.match(text.strip()) or (_LOOSE.match(text.strip()) if loose else None)
+    if not m or not m.group("body").strip():
+        return None
+    return {"name": m.group("name"), "body": m.group("body").strip(), "sep": m.groupdict().get("sep") or ":",
+            "time": real_time(m.group("time"))}
+
+
+def real_time(text: str | None) -> str | None:
+    """'16:43' from a time stamp as read ('16 : 43', '16.43'); None unless it's a real time of day."""
+    m = re.fullmatch(r"(\d{1,2})\s?[:.;]\s?(\d{2})", text or "")
+    return f"{int(m[1]):02d}:{m[2]}" if m and int(m[1]) < 24 and int(m[2]) < 60 else None
+
+
+# ------------------------------------------------------------------ the game scene behind the chat
+# The game's chat box is see-through, so whatever walks behind it gets read too: monster name
+# tags ("Lv. 6] Slime"), character names, damage numbers. Chat text is told apart by where it
+# sits and what it looks like.
+
+MOB_TAG = re.compile(r"\s*\[?\s*Lv\s*[.,]?\s*\d{1,3}\s*\].*$", re.I)  # "Lv. 6] Slime" and all after it
+SENTENCE_TAIL = re.compile(r"^(?P<keep>.*[.!?)])\s*(?P<tail>[^.!?)]*)$")
+
+
+def trim_scene(lines, pitch: float) -> list:
+    """Drop the scene from what was read. A chat line starts at the box's left edge, and its
+    wrapped lines a little indented (about 1.3 lines' height); text further in is the scene.
+    Within a row, chat text runs on without big gaps: a few words after a wide gap (a name
+    tag) end the line, and so does a bare number much taller than the chat text (a damage
+    number; a tall box of words is the mouse pointer over the chat). Longer text after a gap
+    is the chat itself, with a stretch the reader missed (under the pointer, say). A
+    megaphone's own band can't tell: its channel badge and item link sit on boxes of their
+    own colour."""
+    out = []
+    for ln in lines:
+        if ln.left > pitch * 2.5:
+            continue
+        parts = sorted(ln.parts or [], key=lambda q: q[0])
+        keep = parts[:1]
+        for i, q in enumerate(parts[1:], 1):
+            tall = q[3] - q[2] > (keep[0][3] - keep[0][2]) * 1.4
+            rest = " ".join(r[4] for r in parts[i:])
+            if (q[0] - keep[-1][1] > pitch * 2 and len(rest) <= 16) or (tall and re.fullmatch(r"[\d\s.,]+", q[4])):
+                break
+            keep.append(q)
+        if parts and len(keep) < len(parts):
+            ln.text = " ".join(q[4] for q in keep)
+            ln.right = int(max(q[1] for q in keep)) + 1
+        out.append(ln)
+    return out
+
+
+def _garbled(text: str) -> bool:
+    words = re.findall(r"[^\W_]+", text)
+    return len(words) >= 3 and sum(len(w) == 1 for w in words) / len(words) >= 0.4  # stray single letters
+
+
+def clean_body(kind: str, body: str, ignore: list[str]) -> str:
+    """A message without the scene that got read into it: a monster's name tag, a name tag
+    of your own characters, a system message's stray tail ("...use this skill.Snail")."""
+    body = MOB_TAG.sub("", body).strip()
+    if kind == "system":
+        m = SENTENCE_TAIL.match(body)
+        if m and m["tail"] and len(m["tail"].split()) <= 4:
+            body = m["keep"]
+        # garble after the message: scenery read as letters ("skill. l7 e t s te e ae iat er.")
+        sentences = re.split(r"(?<=[.!?])\s+", body)
+        while len(sentences) > 1 and _garbled(sentences[-1]):
+            sentences.pop()
+        body = " ".join(sentences)
+    names = {n.lower() for n in ignore if n}
+    words = body.split()
+    while words and words[-1].strip(".,!?").lower() in names:
+        words.pop()
+    body = " ".join(words)
+    if kind in ("map", "other") and re.fullmatch(r"[\d\s.,]*\d{3}[\d\s.,]*", body):
+        return ""  # a damage number
+    return body
+
+
+def kind_of(line, backgrounds: dict | None = None) -> str | None:
+    """A line's kind, or None to leave it out. The colours decide; a line whose colours are
+    unknown but that sits on a solid band is a megaphone. A known chat colour wins over the
+    band: map chat over a plain stretch of the game scene looks like a band too. System lines
+    ("You have left the party.", "[Friend] X has logged in.") are kept; the "[Notice] beware of
+    scams" broadcasts and the gachapon announcements on their red band are left out."""
+    src = line.source
+    if src == "notice":
+        if "[notice]" in line.text.lower().replace(" ", ""):
+            return None
+        red = (backgrounds or {}).get("notice")
+        if line.band and red and line.bg and _closest(line.bg, red) and \
+                sum((a - b) ** 2 for a, b in zip(line.bg, _closest(line.bg, red))) ** 0.5 < 45:
+            return None
+        return "system"
+    if src in MEGAPHONES:
+        return "mega"
+    if src == "whisper":
+        return "whisper"
+    if src in ("buddy", "guild", "buddy_guild"):
+        return "buddy"
+    if src == "party":
+        return "party"
+    if src == "general":
+        return "map"
+    return "mega" if line.band else "other"
+
+
+class Dedupe:
+    """The chat shows each line for many reads, and text recognition reads it a little
+    differently now and then ("CHO1" / "CH01"): a line close to one seen recently is not new."""
+
+    def __init__(self, minutes: float = 20, compare_last: int = 120):
+        self.minutes, self.compare_last = minutes, compare_last
+        self.recent: deque[tuple[float, str]] = deque()
+
+    def is_new(self, text: str, now: float) -> bool:
+        from rapidfuzz import fuzz
+        key = re.sub(r"[^a-z0-9]", "", text.lower())
+        while self.recent and self.recent[0][0] < now - self.minutes * 60:
+            self.recent.popleft()
+        for _, seen in list(self.recent)[-self.compare_last:]:
+            if key == seen or (len(key) > 8 and fuzz.ratio(key, seen) >= 92):
+                return False
+        self.recent.append((now, key))
+        return True
+
+
+def hex_color(rgb) -> str:
+    return "#%02x%02x%02x" % tuple(max(0, min(255, int(v))) for v in rgb[:3])
+
+
+def _closest(rgb, options):
+    """The listed colour nearest to the one seen; a name may list several ([[r, g, b], ...])."""
+    options = options if options and isinstance(options[0], (list, tuple)) else [options]
+    if not rgb:
+        return options[0]
+    return min(options, key=lambda o: sum((a - b) ** 2 for a, b in zip(rgb, o)))
+
+
+def style_for(line, kind: str, colors: dict, backgrounds: dict) -> tuple[str | None, str | None]:
+    """The game's own look for a line: (text colour, band colour or None). The colours
+    measured for its chat type win, so text recognition's guess doesn't make one whisper a
+    slightly different green from the next; a type not measured yet keeps the colour seen."""
+    src = line.source
+    fg = _closest(line.color, colors[src]) if src in colors else line.color
+    bg = None
+    if kind == "mega" and line.band:
+        bg = _closest(line.bg, backgrounds[src]) if src in backgrounds else line.bg
+    return (hex_color(fg) if fg else None), (hex_color(bg) if bg else None)
+
+
+def messages_from(lines, dedupe: Dedupe, now: float, palette: tuple[dict, dict] | None = None,
+                  ignore: list[str] = ()) -> list[dict]:
+    """New messages from one read of the chat, oldest first, each with the game's colours when
+    a palette (config.toml's [colors] and [backgrounds]) is given. The time shown is your own
+    clock: the game's runs on server time, and text recognition garbles it now and then."""
+    out = []
+    stamp = re.compile(_STAMP)
+    # the game shows time stamps: then every chat line has one, and a line without is the scene
+    stamped = any(real_time((stamp.match(ln.text.strip()) or {"time": None})["time"]) for ln in lines)
+    for ln in lines:
+        kind = kind_of(ln, palette[1] if palette else None)
+        if not kind:
+            continue
+        p = parse(ln.text, loose=kind == "mega")
+        if kind == "system":  # no speaker: the line itself, without its time stamp
+            m = stamp.match(ln.text.strip())
+            body = ln.text.strip()[m.end():].strip()
+            p = {"name": "", "body": body, "sep": "", "time": real_time(m["time"])} if body else None
+        if p:
+            p["body"] = clean_body(kind, p["body"], ignore)
+            # (a megaphone sits on its own band, which the scene can't fake: a garbled stamp is fine)
+            if (stamped and not p["time"] and kind != "mega") or not p["body"]:
+                p = None
+        if not p or not dedupe.is_new(ln.text, now):
+            continue
+        fg, bg = style_for(ln, kind, *palette) if palette else (None, None)
+        msg = {"kind": kind, "time": time.strftime("%H:%M", time.localtime(now)), "name": p["name"],
+               "body": p["body"], "at": now, "to": None, "fg": fg, "bg": bg}
+        if kind == "whisper" or p["sep"] in ("<<", ">>", "«", "»"):
+            msg["kind"] = "whisper"
+            msg["to"] = p["sep"] in ("<<", "«")  # "Name<< hi" is one you sent, "Name>> hi" one you got
+        out.append(msg)
+    return out
+
+
+STAMP_FORMATS = {"seconds": "%H:%M:%S", "minutes": "%H:%M", "off": None}
+
+
+def line_text(msg: dict, stamps: str = "seconds") -> str:
+    """A message as one chat line. The time is Maple Chat's own clock when the line was read,
+    so it's there even when the game shows no time stamps."""
+    who = msg["name"]
+    if msg["kind"] == "whisper":
+        who = f"{'To' if msg['to'] else 'From'} {msg['name']}"
+    text = f"{who} : {msg['body']}" if who else msg["body"]
+    fmt = STAMP_FORMATS.get(stamps, "%H:%M:%S")
+    return f"[{time.strftime(fmt, time.localtime(msg['at']))}] {text}" if fmt else text
+
+
+HISTORY_FILE = HERE / "chat_history.jsonl"
+
+
+def load_history(path: Path, keep_hours: float, now: float) -> list[dict]:
+    """Messages saved by earlier runs, within the kept hours (all of them when keep_hours is 0)."""
+    out = []
+    try:
+        with open(path, encoding="utf-8") as fh:
+            for line in fh:
+                try:
+                    m = json.loads(line)
+                except ValueError:
+                    continue
+                if not keep_hours or now - m.get("at", 0) <= keep_hours * 3600:
+                    out.append(m)
+    except OSError:
+        pass
+    return out
+
+
+def write_atomic(path: Path, text: str) -> None:
+    """Write a whole file at once: a crash halfway leaves the old one, not half a new one."""
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(text, encoding="utf-8")
+    tmp.replace(path)
+
+
+def prune_history(path: Path, keep_hours: float, now: float) -> None:
+    """Drop saved messages older than the kept hours (nothing when they're kept forever)."""
+    if keep_hours and path.exists():
+        kept = load_history(path, keep_hours, now)
+        write_atomic(path, "".join(json.dumps(m) + "\n" for m in kept))
+
+
+def save_message(path: Path, msg: dict) -> None:
+    try:
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(msg) + "\n")
+    except OSError:
+        pass
+
+
+class ChatLog:
+    """Messages in tabs, and which tabs hold messages you haven't seen."""
+
+    def __init__(self, history: int = 400, tab: str = "All"):
+        self.messages: deque[dict] = deque(maxlen=history)
+        self.tab = tab if tab in dict(TABS) else "All"
+        self.unread = {name: False for name, _ in TABS}
+        self.hidden: set[str] = set()  # kinds not shown (kept, so showing them again brings them back)
+
+    def add(self, msg: dict) -> None:
+        self.messages.append(msg)
+        if msg["kind"] == "status" or msg["kind"] in self.hidden:  # nothing to miss
+            return
+        showing = dict(TABS)[self.tab]
+        for name, kinds in TABS:
+            if msg["kind"] in kinds and msg["kind"] not in showing:
+                self.unread[name] = True
+        if msg.get("watch") and self.tab != "Watch":
+            self.unread["Watch"] = True
+
+    def select(self, tab: str) -> None:
+        self.tab, self.unread[tab] = tab, False
+
+    def visible(self) -> list[dict]:
+        if self.tab == "Watch":
+            return [m for m in self.messages if m.get("watch")]
+        kinds = dict(TABS)[self.tab] - self.hidden
+        return [m for m in self.messages if m["kind"] in kinds]
+
+
+# ------------------------------------------------------------------ where the panel goes
+
+
+def to_relative(box: dict, line: float, client: dict) -> dict:
+    """Stored relative to the game window's bottom-left, where the chat box is anchored."""
+    return {"dx": box["left"], "dy": client["height"] - box["top"], "w": box["width"], "h": box["height"],
+            "line": round(line, 1), "cw": client["width"], "ch": client["height"], "bar": box.get("bar")}
+
+
+def from_relative(rel: dict, client: dict) -> dict | None:
+    """Screen rect of the message area for a game window, or None when the window changed size."""
+    if not rel or (rel["cw"], rel["ch"]) != (client["width"], client["height"]):
+        return None
+    return {"left": client["left"] + rel["dx"], "top": client["top"] + client["height"] - rel["dy"],
+            "width": rel["w"], "height": rel["h"]}
+
+
+def strip_height(line: float) -> int:
+    return max(16, round(line * 0.85))
+
+
+def bar_width(line: float) -> int:
+    """The game's scrollbar width (divider and track) when it couldn't be measured: about 1.1 lines."""
+    return max(12, round(line * 1.1))
+
+
+def thumb(total: int, in_view: int, scroll: int, height: int, button: int) -> tuple[int, int]:
+    """(top, height) of the scrollbar's thumb in the track between the two arrow buttons. Its
+    size is the share of the tab's messages in view; at the bottom when showing the newest.
+    `scroll` counts messages up from the newest."""
+    track = max(1, height - 2 * button)
+    if total <= in_view or total == 0:
+        return button, track
+    size = max(min(track, button), round(track * in_view / total))
+    frac = (total - in_view - scroll) / (total - in_view)  # 1 at the newest, 0 at the oldest
+    return button + round((track - size) * max(0.0, min(1.0, frac))), size
+
+
+def scroll_at(top: int, total: int, in_view: int, height: int, button: int, size: int) -> int:
+    """The scroll position for a thumb dragged to `top`."""
+    track = max(1, height - 2 * button)
+    frac = max(0.0, min(1.0, (top - button) / max(1, track - size)))
+    return round((1 - frac) * max(0, total - in_view))
+
+
+def panel_rect(read: dict, extra: int, bar: int = 0) -> dict:
+    """The panel: the game's chat lines reaching `extra` pixels higher, and `bar` pixels wider
+    so its own scrollbar lies exactly over the game's. It grows upward from the bottom, like
+    the game's chat; it never gets smaller than the game's chat, which it has to cover."""
+    extra = max(0, int(extra))
+    return {"left": read["left"], "top": read["top"] - extra, "width": read["width"] + int(bar),
+            "height": read["height"] + extra}
+
+
+def chat_lines(read: dict | None, line: float) -> int:
+    """How many lines the game's chat shows."""
+    return round(read["height"] / line) if read and line else 0
+
+
+class CoverWatch:
+    """Is the game drawing something over its chat (a party invite, a notice)? Then most of
+    the time-stamped lines usually seen there are gone; two reads like that in a row and the
+    panel steps aside until they're back. Only ordinary reads count towards "usual", so a
+    window that stays up a while can't lower it."""
+
+    def __init__(self, keep: int = 20):
+        self.counts: deque[int] = deque(maxlen=keep)
+        self.low_reads = 0
+
+    def covered(self, stamped: int) -> bool:
+        usual = sorted(self.counts)[len(self.counts) // 2] if self.counts else 0
+        low = usual >= 2 and stamped < max(1, usual * 0.4)
+        if low:
+            self.low_reads += 1
+        else:
+            self.low_reads = 0
+            self.counts.append(stamped)
+        return self.low_reads >= 2
+
+
+def resized(current: dict, found: dict, line: float, history: deque) -> dict | None:
+    """The game's chat with its new height, if it was resized. Only the height changes: the
+    chat grows upward from its bottom, and its width stays. The top followed is the second
+    tallest of the recent looks: a partly hidden top line that text recognition sees one time
+    and not the next can't make it flicker, and one stray read above the chat can't grow it."""
+    history.append(found["top"])
+    if len(history) < 2:
+        return None
+    target = sorted(history)[1]
+    if abs(target - current["top"]) <= line * 0.5:
+        return None
+    bottom = current["top"] + current["height"]
+    return {**current, "top": target, "height": bottom - target}
+
+
+def inside(x: int, y: int, r: dict | None) -> bool:
+    return bool(r) and r["left"] <= x < r["left"] + r["width"] and r["top"] <= y < r["top"] + r["height"]
+
+
+def load_settings() -> dict:
+    opts = json.loads(json.dumps(DEFAULTS))
+    try:
+        opts.update(json.loads(SETTINGS_FILE.read_text(encoding="utf-8")))
+    except (OSError, ValueError):
+        pass
+    return opts
+
+
+def save_settings(opts: dict) -> None:
+    write_atomic(SETTINGS_FILE, json.dumps({k: opts.get(k) for k in DEFAULTS}, indent=1))
+
+
+# ------------------------------------------------------------------ the game window
+
+
+def game_geometry() -> dict | None:
+    """The game window: hwnd, its client area on screen, and where that client area sits in
+    the captured picture (which covers the whole window, frame included)."""
+    import ctypes
+    import ctypes.wintypes as wt
+    import reader as core
+    win = core.find_game_window()
+    if not win:
+        return None
+    r = wt.RECT()
+    if ctypes.windll.dwmapi.DwmGetWindowAttribute(wt.HWND(win["hwnd"]), 9, ctypes.byref(r), ctypes.sizeof(r)):
+        ctypes.windll.user32.GetWindowRect(wt.HWND(win["hwnd"]), ctypes.byref(r))  # DWMWA_EXTENDED_FRAME_BOUNDS failed
+    return {"hwnd": win["hwnd"], "client": {k: win[k] for k in ("left", "top", "width", "height")},
+            "ox": win["left"] - r.left, "oy": win["top"] - r.top}
+
+
+def foreground_root() -> int:
+    import ctypes
+    u32 = ctypes.windll.user32
+    u32.GetForegroundWindow.restype = ctypes.c_void_p
+    u32.GetAncestor.restype = ctypes.c_void_p
+    fg = u32.GetForegroundWindow()
+    return u32.GetAncestor(ctypes.c_void_p(fg), 2) or 0 if fg else 0
+
+
+class GameCapture:
+    """The latest picture of the game window (BGRA), at most every 400 ms."""
+
+    def __init__(self, hwnd: int):
+        from windows_capture import WindowsCapture
+        self.lock = threading.Lock()
+        self.frame = None
+        self.closed = False
+        try:
+            cap = WindowsCapture(cursor_capture=False, draw_border=False, minimum_update_interval=400, window_hwnd=hwnd)
+        except Exception:  # Windows 10 can't turn the yellow capture border off
+            cap = WindowsCapture(cursor_capture=False, minimum_update_interval=400, window_hwnd=hwnd)
+
+        @cap.event
+        def on_frame_arrived(frame, control):
+            with self.lock:
+                self.frame = frame.frame_buffer.copy()  # the buffer is only valid during this call
+
+        @cap.event
+        def on_closed():
+            self.closed = True
+
+        self.control = cap.start_free_threaded()
+
+    def latest(self):
+        with self.lock:
+            return self.frame
+
+    def stop(self) -> None:
+        try:
+            self.control.stop()
+        except Exception:
+            pass
+
+
+def make_chime(path: Path, notes, volume: float) -> None:
+    """A soft chime as a .wav: sine notes a little apart, each with a quick attack and decay."""
+    import math
+    import struct
+    import wave
+    rate, dur, gap = 44100, 0.35, 0.07
+    total = int(rate * (dur + gap * (len(notes) - 1)))
+    samples = [0.0] * total
+    for i, freq in enumerate(notes):
+        start = int(rate * gap * i)
+        for n in range(int(rate * dur)):
+            t = n / rate
+            env = min(1.0, t / 0.005) * math.exp(-t * 9)
+            samples[start + n] += (math.sin(2 * math.pi * freq * t) + 0.2 * math.sin(4 * math.pi * freq * t)) * env
+    peak = max(abs(s) for s in samples) or 1
+    with wave.open(str(path), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        w.writeframes(b"".join(struct.pack("<h", int(s / peak * volume * 32767)) for s in samples))
+
+
+def icon_image(size: int = 64):
+    """A blue speech bubble with three dots: the tray icon, and the shortcuts' icon."""
+    from PIL import Image, ImageDraw
+    img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    d, s = ImageDraw.Draw(img), size / 64
+    d.rounded_rectangle((3 * s, 7 * s, 61 * s, 46 * s), radius=11 * s, fill="#2f5597", outline="#9db1d3", width=max(1, round(2 * s)))
+    d.polygon([(15 * s, 44 * s), (12 * s, 59 * s), (29 * s, 45 * s)], fill="#2f5597")
+    for x in (19, 32, 45):
+        d.ellipse(((x - 4.5) * s, 22 * s, (x + 4.5) * s, 31 * s), fill="#ffffff")
+    return img
+
+
+def save_icon(path: Path) -> Path:
+    path.parent.mkdir(exist_ok=True)
+    icon_image(256).save(path, format="ICO", sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (256, 256)])
+    return path
+
+
+def start_tray(app):
+    """An icon in the taskbar's notification area: left click shows or hides the panel, right
+    click opens the menu. It never takes the keyboard from the game, as a taskbar button would."""
+    try:
+        import pystray
+    except ImportError:
+        return None
+    send = lambda *e: (lambda icon, item: app.events.put(e))  # noqa: E731
+    menu = pystray.Menu(
+        pystray.MenuItem("Show / hide", send("hotkey", HK_HIDE), default=True),
+        pystray.MenuItem("Fit to the game's chat", send("hotkey", HK_FIT)),
+        pystray.MenuItem("Adjust position", send("hotkey", HK_EDIT)),
+        pystray.MenuItem("See-through", send("see_through", None), checked=lambda item: app.opts["see_through"]),
+        pystray.MenuItem("Settings…", send("settings", None)),
+        pystray.Menu.SEPARATOR,
+        pystray.MenuItem("Quit", send("hotkey", HK_QUIT)),
+    )
+    icon = pystray.Icon("MapleChat", icon_image(), "Maple Chat", menu)
+    threading.Thread(target=icon.run, daemon=True).start()
+    return icon
+
+
+def frame_image(frame, x0: int, y0: int, x1: int, y1: int):
+    from PIL import Image
+    crop = frame[max(0, y0):max(0, y1), max(0, x0):max(0, x1), :3][:, :, ::-1]  # BGRA -> RGB
+    return Image.fromarray(crop.copy()) if crop.size else None
+
+
+def find_lines(img, reader) -> tuple[dict, float] | None:
+    """The chat's message area in a picture of the lower game window (left at the time stamps,
+    right just before the game's scrollbar, top and bottom at the lines), and the line pitch."""
+    import reader as core
+    import numpy as np
+    box = core.chat_box_in(img, reader)
+    if not box:
+        return None
+    crop = img.crop((box["left"], box["top"], box["left"] + box["width"], box["top"] + box["height"]))
+    old, reader.cfg.scale = reader.cfg.scale, core.FIND_SCALE
+    try:
+        rows = reader._ocr(crop)
+    finally:
+        reader.cfg.scale = old
+    pitch = line_pitch(rows)
+    centers = [box["top"] + (b[0] + b[1]) / 2 for b in rows]
+    arr = np.asarray(img.convert("RGB"))
+    right = band_right(arr, centers, box["left"], box["left"] + box["width"],
+                       min(img.width, int(box["left"] + box["width"] + pitch * 30)), reader.cfg.backgrounds)
+    width = (right - box["left"]) if right else box["width"] + round(pitch * 0.5)
+    end = scrollbar_right(arr, centers, right) if right else None
+    if end:  # the bottom from the scrollbar column: exact even when the newest line wasn't read
+        bottom = chat_bottom(arr, (right + 2 * end) // 3, box["top"] + box["height"] // 2, pitch)
+        if bottom and bottom > box["top"] + pitch:
+            box = {**box, "height": bottom - box["top"]}
+    return {**box, "width": int(width), "bar": (end - right) if end else None}, pitch
+
+
+def scrollbar_right(arr, centers, start: int) -> int | None:
+    """Where the game's scrollbar ends: right of the bands comes a thin dark divider, then the
+    light track (brightness 215 to 231 across, at every scale the game draws its interface).
+    On each chat row, skip the divider and follow the track; the furthest end wins (rows where
+    the darker thumb sits end early). None when no track is found."""
+    ends = []
+    for y in centers:
+        row = arr[int(y), start:start + 200].astype(int).mean(axis=1)
+        i = 0
+        while i < min(len(row), 12) and row[i] < 140:
+            i += 1  # the dark divider
+        j = i
+        while j < len(row) and row[j] >= 200:
+            j += 1  # the light track
+        if j - i >= 6:
+            ends.append(start + j)
+    return int(max(ends)) if ends else None
+
+
+def chat_bottom(arr, x: int, y_mid: int, pitch: float) -> int | None:
+    """The chat box's bottom: going down the game's scrollbar from the middle of the chat, the
+    first near-black pixel is the box's frame line, right above the typing bar. The scrollbar's
+    track, thumb and arrow buttons are never that dark. Text recognition can miss the newest
+    line; this can't. None when no frame line is found within reach."""
+    for y in range(int(y_mid), min(arr.shape[0], int(y_mid + pitch * 20))):
+        if int(arr[y, x, :3].astype(int).sum()) < 90:
+            return y
+    return None
+
+
+def line_pitch(rows) -> float:
+    """Pixels from one chat line to the next: from the first text row to the last, over the
+    rows between (gaps between time stamps alone count a wrapped line twice). With one row,
+    its text height plus a quarter."""
+    import numpy as np
+    if not rows:
+        return 24.0
+    height = float(np.median([b[1] - b[0] for b in rows]))
+    centers = []
+    for c in sorted((b[0] + b[1]) / 2 for b in rows):  # boxes on one row are one line
+        if not centers or c - centers[-1] > height * 0.5:
+            centers.append(c)
+    if len(centers) >= 2:
+        return round(float(centers[-1] - centers[0]) / (len(centers) - 1), 1)
+    return round(height * 1.25, 1)
+
+
+def band_right(arr, centers, left: int, start: int, stop: int, backgrounds: dict) -> int | None:
+    """Where the game's scrollbar starts: megaphone bands are painted from the chat's left edge
+    right up to it. Past `start`, the end of the longest line's text, no line has text any more,
+    so every line on a band of a megaphone's colour (config.toml's [backgrounds]) shows nothing
+    but its band until the scrollbar: the first x where they stop doing so is its edge. The
+    quick-slot buttons and the rest of the screen lie beyond, so they are never reached.
+    Measured in pixels, so it holds at any resolution or Windows scaling."""
+    import numpy as np
+    known = [c for v in backgrounds.values() for c in (v if v and isinstance(v[0], list) else [v])]
+    rows = []
+    for y in centers:
+        row = arr[int(y), left:stop].astype(int)
+        if len(row) < 20 or start - left >= len(row):
+            continue
+        band = np.median(row[: max(4, (start - left) // 3)], axis=0)
+        if known and min(np.abs(band - np.array(c)).sum() for c in known) > 60:
+            continue  # the game scene behind ordinary chat, or UI
+        rows.append(np.abs(row[start - left:] - band).sum(axis=1) < 40)
+    if not rows:
+        return None
+    good = np.mean(rows, axis=0) >= 0.8
+    run = 0
+    for i, ok in enumerate(good):
+        run = 0 if ok else run + 1
+        if run >= 3:
+            return start + i - 2
+    return stop
+
+
+def read_loop(app) -> None:
+    """Reads the chat from pictures of the game window; finds the chat box when asked."""
+    import reader as core
+    cfg = core.Config.load()
+    reader, dedupe, palette = core.Reader(cfg), Dedupe(), (cfg.colors, cfg.backgrounds)
+    capture, hwnd, last_error = None, None, ""
+    last_check, tops, watch = time.time(), deque(maxlen=6), CoverWatch()
+    while not app.stop.is_set():
+        t0 = time.time()
+        try:
+            game = app.game
+            if not game:
+                if capture:
+                    capture.stop()
+                    capture, hwnd = None, None
+            else:
+                if game["hwnd"] != hwnd or (capture and capture.closed):
+                    if capture:
+                        capture.stop()
+                    capture, hwnd = GameCapture(game["hwnd"]), game["hwnd"]
+                frame = capture.latest()
+                if frame is not None:
+                    c, ox, oy = game["client"], game["ox"], game["oy"]
+                    if app.want_fit:
+                        top = int(c["height"] * 0.35)
+                        img = frame_image(frame, ox, oy + top, ox + c["width"], oy + c["height"])
+                        found = find_lines(img, reader) if img else None
+                        if found:
+                            box, line = found
+                            tops.clear()
+                            app.events.put(("fit", to_relative({**box, "top": box["top"] + top}, line, c)))
+                        app.want_fit = False
+                    r = app.read_rect  # client coordinates
+                    if r:
+                        img = frame_image(frame, ox + r["left"], oy + r["top"], ox + r["left"] + r["width"],
+                                          oy + r["top"] + r["height"])
+                        if img:
+                            read = reader.read(img)
+                            # the game drew something over its chat: a party invite or trade request
+                            # (its words land among the lines read, before the scene is left out:
+                            # the pop-up isn't at the chat's left edge), or a window hiding most lines.
+                            # Lines read under a pop-up carry its words, so they wait until it's gone.
+                            popup = any(POPUP.search(ln.text) for ln in read)
+                            lines = core.merge_wrapped(trim_scene(read, app.line), img.height, img.width)
+                            if not popup:
+                                for msg in messages_from(lines, dedupe, t0, palette, app.opts["ignore_names"]):
+                                    app.events.put(("msg", msg))
+                            stamped = sum(1 for ln in lines if core.TIMESTAMP.match(ln.text))
+                            covered = watch.covered(stamped) or popup
+                            if covered != app.covered:
+                                app.events.put(("covered", covered))
+                    if r and not app.want_fit and not app.msgs.edit and t0 - last_check > RECHECK_S:
+                        # the game's chat resized? look at a band from well above it to just below it
+                        last_check, line = t0, app.line
+                        x0, y0 = max(0, int(r["left"] - line)), max(0, int(r["top"] - line * 8))
+                        x1 = min(c["width"], int(r["left"] + r["width"] + line))
+                        y1 = min(c["height"], int(r["top"] + r["height"] + line * 0.5))
+                        img = frame_image(frame, ox + x0, oy + y0, ox + x1, oy + y1)
+                        found = find_lines(img, reader) if img else None
+                        if found:
+                            box = {**found[0], "left": found[0]["left"] + x0, "top": found[0]["top"] + y0}
+                            new = resized(r, box, app.line, tops)
+                            if new:
+                                app.events.put(("fit", to_relative({**new, "bar": app.bar_px}, app.line, c)))
+        except Exception as e:  # keep reading through a bad frame; say so once
+            error = f"Skipped a read ({e.__class__.__name__}: {e})"[:120]
+            if error != last_error:
+                app.events.put(("status", error))
+            last_error = error
+        app.stop.wait(max(0.2, app.opts["interval_s"] - (time.time() - t0)))
+    if capture:
+        capture.stop()
+
+
+DEMO = [  # kind, name, text, whisper sent?, (text colour, band colour) as measured on Windia
+    ("map", "Rowan", "anyone going to Kerning?", None, ("#ffffff", None)),
+    ("mega", "Kestrel", "[Selective 5-slot Coupon] S> 40K CH33 FM", None, ("#462706", "#e0ad01")),
+    ("buddy", "Sunnie", "brb food", None, ("#ff9900", None)),
+    ("whisper", "Nimbi", "are you still selling the claw 60?", False, ("#00ff00", None)),
+    ("mega", "Tarvin", "S> 60% earring INT for 100k ch22 FM", None, ("#770042", "#ce9bb1")),
+    ("party", "Corvo", "boss in 2 min, pots ready", None, (None, None)),
+    ("mega", "wobbit", "[Work Gloves] c/o 120k, pm me", None, ("#09454c", "#53d0be")),
+    ("mega", "Pebbles", "S> mushmom card x5 20k each ch 4", None, ("#770042", "#ce9bb1")),
+    ("whisper", "Nimbi", "yes, 200k, meet at FM ch 9", True, ("#00ff00", None)),
+    ("map", "Lumen", "gl everyone", None, ("#ffffff", None)),
+]
+
+
+def demo_loop(app) -> None:
+    for kind, name, body, to, (fg, bg) in DEMO:
+        if app.stop.wait(1.2):
+            return
+        now = time.time()
+        app.events.put(("msg", {"kind": kind, "name": name, "body": body, "to": to, "at": now, "fg": fg, "bg": bg,
+                                "time": time.strftime("%H:%M", time.localtime(now))}))
+
+
+# ------------------------------------------------------------------ the panel
+
+
+class ChatPanel:
+    def __init__(self, opts: dict, demo: bool = False, always_show: bool = False, verbose: bool = False):
+        import overlay
+        self.overlay, self.opts, self.demo = overlay, opts, demo
+        self.always_show, self.verbose = always_show, verbose
+        self.events: queue.Queue = queue.Queue()
+        self.log = ChatLog(opts["history"], opts["tab"])
+        self.log.hidden = set() if opts["system_messages"] else {"system"}
+        if not demo:  # the chat from earlier runs, within the kept hours
+            now = time.time()
+            prune_history(HISTORY_FILE, opts["keep_hours"], now)
+            self.log.messages.extend(load_history(HISTORY_FILE, opts["keep_hours"], now))
+        self.stop = threading.Event()
+        self.game = None           # set here, read by the reading thread
+        self.read_rect = None      # the chat lines in the game's client coordinates
+        self.want_fit = not opts["box"]
+        self.scroll = 0            # messages scrolled up from the newest
+        self.in_view = 1           # messages that fit in the panel at the last drawing
+        self.bar = None            # what the mouse is doing on the scrollbar: ("thumb", grab offset) / ("repeat", step)
+        self.repeat_id = None
+        self.user_hidden = False
+        self.line = (opts["box"] or {}).get("line") or 24.0
+        self.msgs = overlay.Overlay("Maple Chat", 40, 40, 400, 100, click_through=False)
+        self.root = self.msgs.root
+        self.strip = overlay.Overlay("Maple Chat tabs", 40, 20, 400, 20, master=self.root, click_through=False)
+        for w in (self.msgs, self.strip):
+            w.canvas.configure(bg=self.opts["panel_bg"] or PANEL)
+            w.canvas.bind("<MouseWheel>", self.on_wheel)
+        self.strip.canvas.configure(bg=STRIP)
+        self.strip.canvas.bind("<ButtonPress-1>", self.on_strip_click)
+        self.strip.canvas.bind("<B1-Motion>", self.on_grip_drag)
+        self.strip.canvas.bind("<ButtonRelease-1>", self.on_grip_release)
+        self.grip = None           # (screen y where the drag started, extra then)
+        self.msgs.canvas.bind("<ButtonPress-1>", self.on_press)
+        self.msgs.canvas.bind("<B1-Motion>", self.on_drag)
+        self.msgs.canvas.bind("<ButtonRelease-1>", self.on_release)
+        self.drag = None
+        self.dismissed = None      # the game chat's line count when the ⚠ was clicked away
+        self.covered = False       # the game is drawing something over its chat: step aside
+        self.fit_asked = 0.0
+        self.explained = False     # the "chat too small" note, once a session
+        self.settings = None
+        self.set_fonts()
+        CACHE_DIR.mkdir(exist_ok=True)
+        self.chime = CACHE_DIR / f"whisper_{int(opts['volume'] * 100)}.wav"
+        if not self.chime.exists():
+            make_chime(self.chime, [987.8, 1318.5], max(0.0, min(1.0, opts["volume"])))
+        self.watch_chime = CACHE_DIR / f"watch_{int(opts['volume'] * 100)}.wav"  # three rising notes: not a whisper
+        if not self.watch_chime.exists():
+            make_chime(self.watch_chime, [1046.5, 1318.5, 1568.0], max(0.0, min(1.0, opts["volume"])))
+        import watch
+        self.watch = watch
+        self.watcher = watch.Watcher(watch.load_entries(opts["watch"]), kinds=self.watch_kinds())
+        self.toast = None
+        threading.Thread(target=self.load_names, daemon=True).start()
+        threading.Thread(target=overlay.hotkey_thread, args=(self.events, HOTKEYS), daemon=True).start()
+        threading.Thread(target=demo_loop if demo else read_loop, args=(self,), daemon=True).start()
+        self.tray = start_tray(self)
+        if demo:  # no game: a 4-line panel near the bottom of the main screen
+            w, h = 900, round(self.line * 4)
+            self.place({"left": (self.root.winfo_screenwidth() - w) // 2, "top": self.root.winfo_screenheight() - h - 160,
+                        "width": w, "height": h})
+        self.root.after(100, self.pump)
+        self.root.after(300, self.follow)
+        self.apply_see_through()
+        self.render()
+
+    def watch_kinds(self) -> tuple:
+        return ("mega", "map") if self.opts["watch_map"] else ("mega",)
+
+    def load_names(self) -> None:
+        """Item names and usual prices for the watch list, from the price server, every hour."""
+        while not self.stop.is_set():
+            self.watcher.catalog = self.watch.Catalog.load(self.opts["names_url"] or self.watch.NAMES_URL)
+            if self.stop.wait(self.watch.NAMES_EVERY):
+                return
+
+    def save_watch(self, entries: list) -> None:
+        self.watcher.entries = entries
+        self.opts["watch"] = [e.to_dict() for e in entries]
+        save_settings(self.opts)
+
+    def watched(self, msg: dict) -> None:
+        """Mark a message the watch list catches, and chime and pop up a note for it."""
+        hits = self.watcher.check(msg, msg.get("at"))
+        if not hits:
+            return
+        msg["watch"] = [why for _, why in hits]
+        if self.opts["watch_sound"]:
+            import winsound
+            try:
+                winsound.PlaySound(str(self.watch_chime), winsound.SND_FILENAME | winsound.SND_ASYNC)
+            except RuntimeError:
+                pass
+        if self.opts["watch_popup"]:
+            self.pop_up(msg)
+
+    def pop_up(self, msg: dict) -> None:
+        """A note just above the panel for 12 seconds; clicking it opens the Watch tab."""
+        if self.toast is not None:
+            self.toast.root.destroy()
+        p = self.panel_now()
+        w = max(300, min(560, p["width"] - 20))
+        t = self.toast = self.overlay.Overlay("Maple Chat watch", p["left"] + 10, 0, w, 10, master=self.root,
+                                              click_through=False)
+        c = t.canvas
+        c.configure(bg="#2a2208")
+        head = c.create_text(10, 8, anchor="nw", text="★ " + "; ".join(msg["watch"]), fill=GOLD, font=self.tab_font,
+                             width=w - 20)
+        y = c.bbox(head)[3] + 4
+        body = c.create_text(10, y, anchor="nw", text=line_text(msg, "off"), fill=INK, font=self.font, width=w - 20)
+        h = c.bbox(body)[3] + 10
+        c.create_rectangle(0, 0, w - 1, h - 1, outline=GOLD)
+        t.place(p["left"] + 10, max(0, p["top"] - h - 8), w, h)
+        t.show(True)
+
+        def close(_=None, open_tab=False):
+            if self.toast is t:
+                self.toast = None
+            t.root.destroy()
+            if open_tab:
+                self.log.select("Watch")
+                self.scroll = 0
+                self.render()
+        c.bind("<ButtonPress-1>", lambda e: close(open_tab=True))
+        t.root.after(12000, lambda: t.root.winfo_exists() and close())
+
+    @property
+    def bar_px(self) -> int:
+        """The scrollbar's width: the game's own as measured (divider and track), or a guess."""
+        return int((self.opts["box"] or {}).get("bar") or bar_width(self.line))
+
+    def auto_px(self) -> int:
+        return max(11, round(self.line * 0.62))  # about the game's own chat text
+
+    def set_fonts(self) -> None:
+        import tkinter.font as tkfont
+        self.font = tkfont.Font(family=FONT, size=-(self.opts["font_px"] or self.auto_px()))
+        self.tab_font = tkfont.Font(family=FONT, size=-max(10, round(self.line * 0.5)))
+
+    def warning(self) -> str | None:
+        """Why lines may slip by, if they may: the game's chat is minimised or shows only one
+        or two lines. Clicking the ⚠ puts it away until the chat's size changes again."""
+        n = chat_lines(self.read_rect, self.line)
+        if self.read_rect and n < self.opts["min_lines"] and n != self.dismissed:
+            return f"the game's chat shows only {n} line{'s' if n != 1 else ''}"
+        return None
+
+    def explain(self, reason: str) -> None:
+        self.events.put(("status", f"⚠ Lines may slip by: {reason}, so megaphones arriving together can scroll "
+                                   "away unread. Make the game's chat taller to catch them all. Click ⚠ to hide this."))
+
+    # placing ----------------------------------------------------------------
+
+    def place(self, r: dict) -> None:
+        """The whole panel inside r: the tab strip as its top line, the messages below it."""
+        sh = strip_height(self.line)
+        where = (r["left"], r["top"], r["width"], r["height"], sh)
+        if where == getattr(self, "_where", None):
+            return
+        self._where = where
+        self.strip.place(r["left"], r["top"], r["width"], sh)
+        self.msgs.place(r["left"], r["top"] + sh, r["width"], max(sh, r["height"] - sh))
+        self.render()
+
+    def panel_now(self) -> dict:
+        """The panel's rect as it sits on screen (tab strip and messages together)."""
+        return {"left": self.root.winfo_x(), "top": self.strip.root.winfo_y(), "width": self.msgs.width,
+                "height": self.strip.height + self.msgs.height}
+
+    def follow(self) -> None:
+        """Keep the panel on the game's chat box, and show it only while the game is in front."""
+        if not self.demo:
+            game = game_geometry()
+            self.game = game
+            rect = from_relative(self.opts["box"], game["client"]) if game else None
+            if game and not rect and not self.want_fit and not self.msgs.edit and time.time() - self.fit_asked > 10:
+                self.want_fit, self.fit_asked = True, time.time()  # first start, or the game window changed size
+            if game and rect and not self.msgs.edit:
+                self.line = self.opts["box"]["line"]
+                self.read_rect = {"left": rect["left"] - game["client"]["left"],
+                                  "top": rect["top"] - game["client"]["top"], "width": rect["width"],
+                                  "height": rect["height"]}
+                self.place(panel_rect(rect, self.opts["extra"], self.bar_px))
+                reason = self.warning()
+                if reason and not self.explained:
+                    self.explained = True
+                    self.explain(reason)
+            ours = {self.msgs.hwnd, self.strip.hwnd}
+            front = game and (foreground_root() in ({game["hwnd"]} | ours))
+            visible = bool((front or self.always_show) and rect) and not self.user_hidden and not self.covered
+            self.msgs.show(visible or self.msgs.edit)
+            self.strip.show(visible or self.msgs.edit)
+        self.root.after(300, self.follow)
+
+    def apply_see_through(self) -> None:
+        """◐ on: the messages 90% see-through, and clicks go to the game's chat below. The tab
+        strip stays solid and clickable, so ◐ can always be clicked off again."""
+        on = bool(self.opts["see_through"]) and not self.msgs.edit
+        self.msgs.set_alpha(self.opts["peek_alpha"] if on else self.opts["opacity"])
+        self.strip.set_alpha(self.opts["opacity"])
+        self.msgs.through = on
+        self.msgs.click_through(on)
+
+    def toggle_see_through(self) -> None:
+        self.opts["see_through"] = not self.opts["see_through"]
+        save_settings(self.opts)
+        self.apply_see_through()
+
+    # events -----------------------------------------------------------------
+
+    def pump(self) -> None:
+        changed = False
+        try:
+            while True:
+                kind, data = self.events.get_nowait()
+                if self.verbose:
+                    print(time.strftime("%H:%M:%S"), kind, f"{data['kind']:>7} {line_text(data)}" if kind == "msg" else data,
+                          flush=True)
+                if kind == "msg":
+                    self.watched(data)
+                    self.log.add(data)
+                    if not self.demo:
+                        save_message(HISTORY_FILE, data)
+                    if self.scroll and data["kind"] in dict(TABS)[self.log.tab]:
+                        self.scroll_to(self.scroll + 1)  # reading history: keep the same lines in view
+                    changed = True
+                    if data["kind"] == "whisper" and not data["to"] and self.opts["whisper_sound"]:
+                        import winsound
+                        try:
+                            winsound.PlaySound(str(self.chime), winsound.SND_FILENAME | winsound.SND_ASYNC)
+                        except RuntimeError:
+                            pass
+                elif kind == "fit":
+                    self.opts["box"] = data
+                    self.line = data["line"]
+                    self.set_fonts()
+                    save_settings(self.opts)
+                elif kind == "see_through":
+                    self.toggle_see_through()
+                    changed = True
+                elif kind == "settings":
+                    self.open_settings()
+                elif kind == "covered":
+                    self.covered = data
+                elif kind == "status":
+                    now = time.time()
+                    if (data, ) != getattr(self, "_last_status", (None, ))[:1] or now - self._last_status[1] > 60:
+                        self._last_status = (data, now)  # the same note again within a minute: once is enough
+                        self.log.add({"kind": "status", "name": "", "body": data, "at": now, "to": None,
+                                      "time": time.strftime("%H:%M", time.localtime(now))})
+                        changed = True
+                elif kind == "hotkey":
+                    self.on_hotkey(data)
+                    changed = True
+        except queue.Empty:
+            pass
+        if changed:
+            self.render()
+        self.root.after(100, self.pump)
+
+    def on_hotkey(self, hk: int) -> None:
+        if hk == HK_EDIT:
+            locked = self.msgs.toggle_edit()
+            self.strip.edit = self.msgs.edit
+            self.apply_see_through()  # solid while adjusting
+            if locked and self.game:
+                c, p = self.game["client"], self.panel_now()
+                extra = max(0, min(self.opts["extra"], p["height"] - 2 * round(self.line)))
+                box = {"left": p["left"] - c["left"], "top": p["top"] - c["top"] + extra,
+                       "width": p["width"] - self.bar_px, "height": p["height"] - extra, "bar": self.bar_px}
+                self.opts["box"], self.opts["extra"] = to_relative(box, self.line, c), extra
+                save_settings(self.opts)
+        elif hk == HK_FIT:
+            self.want_fit = True
+        elif hk == HK_HIDE:
+            self.user_hidden = not self.user_hidden
+        elif hk == HK_QUIT:
+            self.stop.set()
+            if self.tray:
+                self.tray.stop()
+            self.root.destroy()
+
+    def tab_spans(self) -> list[tuple[str, int, int]]:
+        x, out, pad = strip_height(self.line) + 6, [], 10  # after the ≡ grip
+        for name, _ in TABS:
+            w = self.tab_font.measure(name) + 2 * pad
+            out.append((name, x, x + w))
+            x += w + 3
+        return out
+
+    def on_strip_click(self, e) -> None:
+        if e.x < strip_height(self.line) + 4:  # the ≡ grip: drag up or down to resize, like the game's chat
+            self.grip = (e.y_root, self.opts["extra"])
+            return
+        sh = strip_height(self.line)
+        if e.x >= self.strip.width - sh - 4:
+            self.toggle_see_through()
+        elif e.x >= self.strip.width - 2 * sh - 8 and self.warning():
+            self.dismissed = chat_lines(self.read_rect, self.line)  # the ⚠ clicked: put away for this chat size
+        for name, x0, x1 in self.tab_spans():
+            if x0 <= e.x < x1:
+                self.log.select(name)
+                self.opts["tab"], self.scroll = name, 0
+                save_settings(self.opts)
+        self.render()
+
+    def on_grip_drag(self, e) -> None:
+        if self.grip and self.read_rect and self.game:
+            y0, extra0 = self.grip
+            c = self.game["client"]
+            top_room = c["top"] + self.read_rect["top"]  # up to the top of the screen
+            self.opts["extra"] = max(0, min(top_room, extra0 + (y0 - e.y_root)))
+            read = {**self.read_rect, "left": c["left"] + self.read_rect["left"], "top": c["top"] + self.read_rect["top"]}
+            self.place(panel_rect(read, self.opts["extra"], self.bar_px))
+
+    def on_grip_release(self, e) -> None:
+        if self.grip:
+            self.grip = None
+            save_settings(self.opts)
+
+    # scrolling, like the game's chat ---------------------------------------
+
+    def scroll_to(self, scroll: int) -> None:
+        most = max(0, len(self.log.visible()) - max(1, self.in_view))
+        self.scroll = max(0, min(most, scroll))
+
+    def on_wheel(self, e) -> None:
+        self.scroll_to(self.scroll + max(1, abs(e.delta) // 120) * (1 if e.delta > 0 else -1))
+        self.render()
+
+    def bar_hit(self, y: int) -> str:
+        """Which part of the scrollbar is at height y: up, down, thumb, page_up or page_down."""
+        b, h = self.bar_px, self.msgs.height
+        if y < b:
+            return "up"
+        if y >= h - b:
+            return "down"
+        top, size = thumb(len(self.log.visible()), self.in_view, self.scroll, h, b)
+        return "thumb" if top <= y < top + size else ("page_up" if y < top else "page_down")
+
+    def step(self, part: str) -> None:
+        """One step of a held arrow or track click; repeats while the button is held, like the game's."""
+        n = {"up": 1, "down": -1, "page_up": max(1, self.in_view - 1), "page_down": -max(1, self.in_view - 1)}[part]
+        self.scroll_to(self.scroll + n)
+        self.render()
+        self.repeat_id = self.root.after(350 if self.repeat_id is None else 70, self.step, part)
+
+    def on_press(self, e) -> None:
+        if self.msgs.edit:
+            near_corner = e.x > self.msgs.width - 16 and e.y > self.msgs.height - 16
+            p = self.panel_now()
+            self.drag = ("size" if near_corner else "move", e.x_root, e.y_root, p["left"], p["top"], p["width"],
+                         p["height"])
+            return
+        if e.x >= self.msgs.width - self.bar_px:
+            part = self.bar_hit(e.y)
+            if part == "thumb":
+                top, _ = thumb(len(self.log.visible()), self.in_view, self.scroll, self.msgs.height,
+                               self.bar_px)
+                self.bar = ("thumb", e.y - top)
+            else:
+                self.bar, self.repeat_id = ("repeat", part), None
+                self.step(part)
+
+    def on_release(self, e) -> None:
+        if self.repeat_id is not None:
+            self.root.after_cancel(self.repeat_id)
+        self.bar, self.repeat_id, self.drag = None, None, None
+
+    def on_drag(self, e) -> None:
+        if self.bar and self.bar[0] == "thumb":
+            b, total = self.bar_px, len(self.log.visible())
+            _, size = thumb(total, self.in_view, self.scroll, self.msgs.height, b)
+            self.scroll_to(scroll_at(e.y - self.bar[1], total, self.in_view, self.msgs.height, b, size))
+            self.render()
+            return
+        if not (self.msgs.edit and self.drag):
+            return
+        mode, x0, y0, left, top, w, h = self.drag
+        dx, dy = e.x_root - x0, e.y_root - y0
+        if mode == "move":
+            self.place({"left": left + dx, "top": top + dy, "width": w, "height": h})
+        else:
+            self.place({"left": left, "top": top, "width": max(200, w + dx), "height": max(2 * round(self.line), h + dy)})
+
+    # drawing ----------------------------------------------------------------
+
+    def render(self) -> None:
+        self.render_strip()
+        self.render_messages()
+
+    def render_strip(self) -> None:
+        c, h = self.strip.canvas, self.strip.height
+        c.delete("all")
+        g = h - 4  # the ≡ grip
+        c.create_rectangle(4, 2, 4 + g, h - 2, fill=TAB, outline="")
+        for i in (-1, 0, 1):
+            y = h // 2 + 1 + i * max(3, h // 6)
+            c.create_line(8, y, g, y, fill=SOFT, width=2)
+        for name, x0, x1 in self.tab_spans():
+            on = name == self.log.tab
+            c.create_rectangle(x0, 2, x1, h, fill=TAB_ON if on else TAB, outline="")
+            c.create_text((x0 + x1) // 2, h // 2 + 1, text=name, fill=INK if on else SOFT, font=self.tab_font)
+            if self.log.unread.get(name):
+                r = max(3, h // 6)
+                c.create_oval(x1 - 2 * r - 2, 3, x1 - 2, 3 + 2 * r, fill=GOLD if name == "Watch" else DOT, outline="")
+        s = h - 4
+        x = self.strip.width - s - 4
+        c.create_rectangle(x, 2, x + s, h - 2, fill=TAB_ON if self.opts["see_through"] else TAB, outline="")
+        c.create_text(x + s // 2, h // 2 + 1, text="◐", fill=INK if self.opts["see_through"] else SOFT,
+                      font=self.tab_font)
+        if self.warning():  # quiet: an amber mark, explained once a session; a click puts it away
+            c.create_text(x - 4 - s // 2, h // 2 + 1, text="⚠", fill=WARN, font=self.tab_font)
+
+    # settings -----------------------------------------------------------------
+
+    def set_text_size(self, px: int | None) -> None:
+        self.opts["font_px"] = px
+        self.set_fonts()
+        self.render()
+        save_settings(self.opts)
+
+    def set_opt(self, key: str, value) -> None:
+        self.opts[key] = value
+        save_settings(self.opts)
+        self.render()
+
+    def pick_colour(self, key: str) -> None:
+        """A colour picker for the background (panel_bg) or one chat type's text."""
+        from tkinter import colorchooser
+        now = self.opts["panel_bg"] or PANEL if key == "panel_bg" else self.opts["colors"].get(key) or COLORS[key]
+        _, chosen = colorchooser.askcolor(color=now, parent=self.settings, title="Maple Chat colour")
+        if not chosen:
+            return
+        if key == "panel_bg":
+            self.opts["panel_bg"] = chosen
+            for w in (self.msgs, self.strip):
+                w.canvas.configure(bg=chosen)
+        else:
+            self.opts["colors"] = {**self.opts["colors"], key: chosen}
+        self.set_opt(key if key == "panel_bg" else "colors", self.opts[key if key == "panel_bg" else "colors"])
+
+    def reset_colours(self) -> None:
+        self.opts["colors"], self.opts["panel_bg"] = {}, None
+        for w in (self.msgs, self.strip):
+            w.canvas.configure(bg=PANEL)
+        self.strip.canvas.configure(bg=STRIP)
+        save_settings(self.opts)
+        self.render()
+
+    def open_settings(self) -> None:
+        """A small window with the text size and peek sliders; changes apply as you drag."""
+        import tkinter as tk
+        if self.settings is not None and self.settings.winfo_exists():
+            self.settings.deiconify()
+            self.settings.lift()
+            return
+        win = self.settings = tk.Toplevel(self.root)
+        win.title("Maple Chat settings")
+        win.configure(bg=PANEL, padx=18, pady=14)
+        win.resizable(False, False)
+        win.attributes("-topmost", True)
+        try:
+            win.iconbitmap(str(save_icon(CACHE_DIR / "maple_chat.ico")))
+        except Exception:
+            pass
+        look = {"bg": PANEL, "fg": INK, "font": (FONT, 10)}
+        slider = {"orient": "horizontal", "length": 320, "bg": PANEL, "fg": INK, "troughcolor": TAB,
+                  "highlightthickness": 0, "activebackground": TAB_ON, "font": (FONT, 9)}
+
+        size = tk.IntVar(value=self.opts["font_px"] or self.auto_px())
+        tk.Label(win, text="Text size (pixels)", anchor="w", **look).pack(fill="x")
+        tk.Scale(win, from_=9, to=32, variable=size, command=lambda v: self.set_text_size(int(float(v))),
+                 **slider).pack(fill="x")
+        tk.Button(win, text="Match the game's text", font=(FONT, 9),
+                  command=lambda: (self.set_text_size(None), size.set(self.auto_px()))).pack(anchor="w", pady=(2, 12))
+
+        see = tk.IntVar(value=round((1 - self.opts["peek_alpha"]) * 100))
+
+        def set_see(v):
+            self.opts["peek_alpha"] = round(1 - int(float(v)) / 100, 2)
+            save_settings(self.opts)
+            self.apply_see_through()
+        tk.Label(win, text="How see-through ◐ makes it (%)", anchor="w", **look).pack(fill="x")
+        tk.Scale(win, from_=50, to=95, variable=see, command=set_see, **slider).pack(fill="x")
+
+        opacity = tk.IntVar(value=round(self.opts["opacity"] * 100))
+
+        def set_opacity(v):
+            self.opts["opacity"] = round(int(float(v)) / 100, 2)
+            save_settings(self.opts)
+            self.apply_see_through()
+        tk.Label(win, text="Panel opacity (%)", anchor="w", **look).pack(fill="x", pady=(12, 0))
+        tk.Scale(win, from_=30, to=100, variable=opacity, command=set_opacity, **slider).pack(fill="x")
+
+        # time stamps: Maple Chat's own clock, so they're there even when the game shows none
+        tk.Label(win, text="Time stamps", anchor="w", **look).pack(fill="x", pady=(12, 0))
+        stamps = tk.StringVar(value=self.opts["timestamps"])
+        row = tk.Frame(win, bg=PANEL)
+        row.pack(anchor="w")
+        for value, text in (("seconds", "18:16:05"), ("minutes", "18:16"), ("off", "Off")):
+            tk.Radiobutton(row, text=text, value=value, variable=stamps, selectcolor=TAB, activebackground=PANEL,
+                           activeforeground=INK, command=lambda: self.set_opt("timestamps", stamps.get()),
+                           **look).pack(side="left", padx=(0, 10))
+
+        # how long the chat is kept between restarts
+        tk.Label(win, text="Keep chat history for (hours)", anchor="w", **look).pack(fill="x", pady=(12, 0))
+        row = tk.Frame(win, bg=PANEL)
+        row.pack(anchor="w")
+        hours = tk.StringVar(value=str(self.opts["keep_hours"] or 12))
+        forever = tk.BooleanVar(value=not self.opts["keep_hours"])
+
+        def set_keep(*_):
+            try:
+                h = max(1, int(float(hours.get())))
+            except ValueError:
+                return
+            self.set_opt("keep_hours", 0 if forever.get() else h)
+        tk.Spinbox(row, from_=1, to=720, width=5, textvariable=hours, command=set_keep, font=(FONT, 10)).pack(side="left")
+        hours.trace_add("write", set_keep)
+        tk.Checkbutton(row, text="Forever", variable=forever, command=set_keep, selectcolor=TAB, activebackground=PANEL,
+                       activeforeground=INK, **look).pack(side="left", padx=10)
+
+        # colours: the background and the text of each chat type (empty: the game's own)
+        tk.Label(win, text="Colours", anchor="w", **look).pack(fill="x", pady=(12, 0))
+        row = tk.Frame(win, bg=PANEL)
+        row.pack(anchor="w")
+        for key, label in (("panel_bg", "Background"), ("map", "Map"), ("whisper", "Whisper"), ("party", "Party"),
+                           ("buddy", "Buddy"), ("system", "System"), ("mega", "Mega")):
+            tk.Button(row, text=label, font=(FONT, 9), command=lambda k=key: self.pick_colour(k)).pack(side="left", padx=1)
+        tk.Button(win, text="Reset to default colours", font=(FONT, 9), command=self.reset_colours).pack(anchor="w", pady=(4, 0))
+
+        # your characters' name tags show through the chat box when they walk behind it
+        tk.Label(win, text="Your character names, comma separated (their name tags behind the chat aren't chat)",
+                 anchor="w", **look).pack(fill="x", pady=(12, 0))
+        names = tk.StringVar(value=", ".join(self.opts["ignore_names"]))
+
+        def set_names(*_):
+            self.opts["ignore_names"] = [n.strip() for n in names.get().split(",") if n.strip()]
+            save_settings(self.opts)
+        tk.Entry(win, textvariable=names, width=44, font=(FONT, 10)).pack(anchor="w")
+        names.trace_add("write", set_names)
+
+        system = tk.BooleanVar(value=self.opts["system_messages"])
+
+        def set_system():
+            self.opts["system_messages"] = system.get()
+            self.log.hidden = set() if system.get() else {"system"}
+            self.scroll = 0
+            self.set_opt("system_messages", system.get())
+        tk.Checkbutton(win, text="Show the game's system messages (out of MP, shop closed, play time…)",
+                       variable=system, command=set_system, selectcolor=TAB, activebackground=PANEL,
+                       activeforeground=INK, **look).pack(anchor="w", pady=(12, 0))
+
+        sound = tk.BooleanVar(value=self.opts["whisper_sound"])
+
+        def set_sound():
+            self.opts["whisper_sound"] = sound.get()
+            save_settings(self.opts)
+        tk.Checkbutton(win, text="Chime when a whisper arrives", variable=sound, command=set_sound, selectcolor=TAB,
+                       activebackground=PANEL, activeforeground=INK, **look).pack(anchor="w", pady=(12, 0))
+        self.watch_settings(win, look)
+        tk.Button(win, text="Close", font=(FONT, 9), command=win.destroy).pack(anchor="e", pady=(14, 0))
+        win.update_idletasks()
+        x = self.root.winfo_x() + 20
+        y = max(0, self.strip.root.winfo_y() - win.winfo_height() - 20)
+        win.geometry(f"+{x}+{y}")
+
+    def watch_settings(self, win, look: dict) -> None:
+        """The watch list: what to look out for, and how to be told."""
+        import tkinter as tk
+        check = {"selectcolor": TAB, "activebackground": PANEL, "activeforeground": INK, **look}
+        tk.Label(win, text="Watch list: tell me when a megaphone mentions…", anchor="w", **look).pack(fill="x", pady=(14, 0))
+        row = tk.Frame(win, bg=PANEL)
+        row.pack(fill="x")
+        box = tk.Listbox(row, height=5, width=40, bg=TAB, fg=INK, selectbackground=TAB_ON, highlightthickness=0,
+                         font=(FONT, 9), activestyle="none")
+        box.pack(side="left", fill="x", expand=True)
+
+        def refresh():
+            box.delete(0, "end")
+            for e in self.watcher.entries:
+                box.insert("end", ("★ " if e.on else "   (off) ") + e.label())
+
+        def chosen():
+            sel = box.curselection()
+            return sel[0] if sel else None
+
+        def edit(i=None):
+            self.edit_watch_entry(i, refresh)
+
+        def remove():
+            i = chosen()
+            if i is not None:
+                self.save_watch([e for k, e in enumerate(self.watcher.entries) if k != i])
+                refresh()
+
+        def toggle():
+            i = chosen()
+            if i is not None:
+                self.watcher.entries[i].on = not self.watcher.entries[i].on
+                self.save_watch(self.watcher.entries)
+                refresh()
+                box.selection_set(i)
+        buttons = tk.Frame(row, bg=PANEL)
+        buttons.pack(side="left", padx=(6, 0), anchor="n")
+        for text, cmd in (("Add…", edit), ("Edit…", lambda: chosen() is not None and edit(chosen())),
+                          ("Remove", remove), ("On / off", toggle)):
+            tk.Button(buttons, text=text, font=(FONT, 9), width=8, command=cmd).pack(pady=1)
+        box.bind("<Double-Button-1>", lambda e: chosen() is not None and edit(chosen()))
+        refresh()
+
+        for key, text in (("watch_map", "Also look in map chat"), ("watch_sound", "Chime when it finds one"),
+                          ("watch_popup", "Pop up a note by the chat")):
+            var = tk.BooleanVar(value=self.opts[key])
+
+            def set_flag(k=key, v=var):
+                self.opts[k] = v.get()
+                save_settings(self.opts)
+                self.watcher.kinds = set(self.watch_kinds())
+            tk.Checkbutton(win, text=text, variable=var, command=set_flag, **check).pack(anchor="w")
+
+    def edit_watch_entry(self, index: int | None, done) -> None:
+        """Add or change one watch-list entry: a word or an item (names suggested from the price
+        site's catalog), and the conditions for items."""
+        import tkinter as tk
+        w = self.watch
+        old = self.watcher.entries[index] if index is not None else w.Entry("")
+        dlg = tk.Toplevel(self.settings or self.root)
+        dlg.title("Watch for…")
+        dlg.configure(bg=PANEL, padx=16, pady=12)
+        dlg.resizable(False, False)
+        dlg.attributes("-topmost", True)
+        dlg.transient(self.settings or self.root)
+        look = {"bg": PANEL, "fg": INK, "font": (FONT, 10)}
+        check = {"selectcolor": TAB, "activebackground": PANEL, "activeforeground": INK, **look}
+
+        tk.Label(dlg, text="A word or an item name", anchor="w", **look).pack(fill="x")
+        text = tk.StringVar(value=old.text)
+        field = tk.Entry(dlg, textvariable=text, width=42, font=(FONT, 10))
+        field.pack(fill="x")
+        hints = tk.Listbox(dlg, height=5, bg=TAB, fg=INK, selectbackground=TAB_ON, highlightthickness=0,
+                           font=(FONT, 9), activestyle="none")
+        hints.pack(fill="x")
+        known = tk.Label(dlg, anchor="w", justify="left", bg=PANEL, fg=SOFT, font=(FONT, 9), wraplength=380)
+        known.pack(fill="x", pady=(2, 8))
+
+        def typed(*_):
+            hints.delete(0, "end")
+            for name in self.watcher.catalog.suggest(text.get()):
+                if name.lower() != text.get().strip().lower():
+                    hints.insert("end", name)
+            item = self.watcher.catalog.resolve(text.get())
+            if item:
+                usual = f", usually sells for {w.money(item['usual'])}" if item.get("usual") else ""
+                also = f"; also finds {', '.join(item['aliases'][:4])}" if item.get("aliases") else ""
+                known.configure(text=f"Item: {item['name']}{usual}{also}")
+            elif not self.watcher.catalog.items:
+                known.configure(text="Item names aren't loaded (price site unreachable): matched as written.")
+            else:
+                known.configure(text="Not an item the price site knows: matched as a word.")
+        text.trace_add("write", typed)
+        hints.bind("<<ListboxSelect>>", lambda e: hints.curselection() and text.set(hints.get(hints.curselection()[0])))
+        typed()
+
+        exact = tk.BooleanVar(value=old.exact)
+        tk.Checkbutton(dlg, text="This exact word only (no close spellings)", variable=exact, **check).pack(anchor="w")
+        tk.Label(dlg, text="Only when… (reads the megaphone's price, like the price site does)", anchor="w",
+                 **look).pack(fill="x", pady=(10, 0))
+        sellers = tk.BooleanVar(value=old.sellers_only)
+        tk.Checkbutton(dlg, text="someone is selling it (S>), not buying", variable=sellers, **check).pack(anchor="w")
+        row = tk.Frame(dlg, bg=PANEL)
+        row.pack(anchor="w")
+        tk.Label(row, text="it costs at most", **look).pack(side="left", padx=(4, 4))
+        top = tk.StringVar(value=w.money(old.max_price) if old.max_price else "")
+        tk.Entry(row, textvariable=top, width=9, font=(FONT, 10)).pack(side="left")
+        tk.Label(row, text="mesos each  (e.g. 1.5m, 400k)", bg=PANEL, fg=SOFT, font=(FONT, 9)).pack(side="left", padx=4)
+        under = tk.BooleanVar(value=old.under_usual)
+        tk.Checkbutton(dlg, text="it is well under the usual price (20% or more below)", variable=under,
+                       **check).pack(anchor="w")
+        problem = tk.Label(dlg, anchor="w", bg=PANEL, fg=WARN, font=(FONT, 9))
+        problem.pack(fill="x")
+
+        def save():
+            name = text.get().strip()
+            price = w.parse_price(top.get()) if top.get().strip() else None
+            if not name:
+                problem.configure(text="Type a word or an item name.")
+                return
+            if top.get().strip() and not price:
+                problem.configure(text="The price should look like 1.5m, 400k or 250000.")
+                return
+            item = self.watcher.catalog.resolve(name)
+            if under.get() and not (item and item.get("usual")):
+                problem.configure(text="The usual price is only known for items the price site has sales for.")
+                return
+            entry = w.Entry(item["name"] if item and (sellers.get() or price or under.get()) else name,
+                            exact.get(), sellers.get(), price, under.get(), old.on)
+            entries = list(self.watcher.entries)
+            if index is None:
+                entries.append(entry)
+            else:
+                entries[index] = entry
+            self.save_watch(entries)
+            done()
+            dlg.destroy()
+        row = tk.Frame(dlg, bg=PANEL)
+        row.pack(anchor="e", pady=(12, 0))
+        tk.Button(row, text="Save", font=(FONT, 9), width=8, command=save).pack(side="left", padx=4)
+        tk.Button(row, text="Cancel", font=(FONT, 9), width=8, command=dlg.destroy).pack(side="left")
+        dlg.bind("<Return>", lambda e: save())
+        dlg.bind("<Escape>", lambda e: dlg.destroy())
+        field.focus_set()
+
+    def render_messages(self) -> None:
+        c, w, h = self.msgs.canvas, self.msgs.width, self.msgs.height
+        c.delete("all")
+        b, pad = self.bar_px, 6
+        shown = self.log.visible()
+        end = len(shown) - self.scroll
+        y, fits = h - 2, 0
+        for m in reversed(shown[:max(0, end)]):
+            star = "★ " if m.get("watch") and self.log.tab != "Watch" else ""
+            t = c.create_text(pad, 0, anchor="nw", text=star + line_text(m, self.opts["timestamps"]),
+                              fill=self.opts["colors"].get(m["kind"]) or m.get("fg") or COLORS[m["kind"]],
+                              font=self.font, width=w - 2 * pad - b)
+            th = c.bbox(t)[3]
+            c.move(t, 0, y - th)
+            if m.get("bg"):  # a megaphone's band, as the game draws it
+                band = c.create_rectangle(0, y - th, w - b - 1, y, fill=m["bg"], outline="")
+                c.tag_lower(band)
+            if m.get("watch"):  # caught by the watch list: a gold edge
+                c.create_rectangle(0, y - th, 2, y - 1, fill=GOLD, outline="")
+            y -= th
+            if y < 0:
+                break
+            fits += 1
+        self.in_view = max(1, fits)
+        self.render_scrollbar(c, w, h, b, len(shown))
+
+    def render_scrollbar(self, c, w: int, h: int, b: int, total: int) -> None:
+        """The game's scrollbar, lying over the game's own: a dark divider, a light track, arrow
+        buttons at both ends and a thumb to drag."""
+        divider = max(1, round(b / 6))
+        c.create_rectangle(w - b, 0, w - b + divider - 1, h - 1, fill="#1a1f2a", outline="")
+        x0, b = w - b + divider, b - divider  # the track: arrows and thumb are as wide as it
+        c.create_rectangle(x0, 0, w - 1, h - 1, fill=SB_TRACK, outline=SB_EDGE)
+        for y0, up in ((0, True), (h - b, False)):
+            c.create_rectangle(x0, y0, w - 1, y0 + b - 1, fill=SB_BUTTON, outline=SB_EDGE)
+            m, a = x0 + b / 2, b * 0.28
+            pts = (m - a, y0 + b * 0.62, m + a, y0 + b * 0.62, m, y0 + b * 0.36) if up else \
+                (m - a, y0 + b * 0.38, m + a, y0 + b * 0.38, m, y0 + b * 0.64)
+            c.create_polygon(*pts, fill=SB_ARROW, outline="")
+        top, size = thumb(total, self.in_view, self.scroll, h, b)
+        if total > self.in_view:
+            c.create_rectangle(x0 + 2, top, w - 3, top + size - 1, fill=SB_THUMB, outline=SB_EDGE)
+        if self.msgs.edit:
+            c.create_rectangle(1, 1, w - 2, h - 2, outline="#9db1d3", dash=(4, 3))
+            c.create_rectangle(w - 14, h - 14, w - 2, h - 2, fill="#9db1d3", outline="")
+            c.create_text(w // 2, h // 2, text="Drag to move, corner to resize. Ctrl+Alt+F5 saves.", fill=INK,
+                          font=self.tab_font)
+
+
+def print_replay(paths: list[Path]) -> None:
+    """What each saved screenshot's chat lines become: their kind and the tabs that show them."""
+    import reader as core
+    from PIL import Image
+    reader, dedupe, log = core.Reader(core.Config.load()), Dedupe(), ChatLog()
+    for p in paths:
+        img, found = Image.open(p).convert("RGB"), None
+        if img.height > 400:
+            found = find_lines(img.crop((0, int(img.height * 0.35), img.width, img.height)), reader)
+            if found:
+                b = found[0]
+                top = int(img.height * 0.35) + b["top"]
+                img = img.crop((b["left"], top, b["left"] + b["width"], top + b["height"]))
+        pitch = found[1] if found else 16.0  # a crop of the chat lines as saved: the game's own at 1080p
+        lines = core.merge_wrapped(trim_scene(reader.read(img), pitch), img.height, img.width)
+        print(f"{p.name}:")
+        for ln in lines:
+            print(f"  {kind_of(ln) or 'left out':>8}  [{ln.source}{', band' if ln.band else ''}] {ln.text}")
+        for m in messages_from(lines, dedupe, time.time()):
+            log.add(m)
+    for name, _ in TABS:
+        log.select(name)
+        print(f"{name} tab:")
+        for m in log.visible():
+            print(f"  {line_text(m)}")
+
+
+def main(argv: list[str]) -> None:
+    import overlay
+    if "--make-icon" in argv:  # for shortcuts: cache/maple_chat.ico
+        print(save_icon(CACHE_DIR / "maple_chat.ico"))
+        return
+    if "--replay" in argv:
+        print_replay([Path(a) for a in argv[argv.index("--replay") + 1:] if not a.startswith("--")])
+        return
+    if not overlay.single_instance("MapleChatOverlay"):
+        return
+    overlay.dpi_aware()
+    ChatPanel(load_settings(), demo="--demo" in argv, always_show="--always-show" in argv,
+              verbose="--verbose" in argv).root.mainloop()
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

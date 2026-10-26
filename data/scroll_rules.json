@@ -1,0 +1,49 @@
+{
+  "_comment": "How chat shorthand like '60% glove att' maps to Classic World scroll names. Classic World names scrolls '<Slot> <Stat> Scroll: <Tier>' (e.g. 'Gloves Attack Scroll: Intermediate' = 60%). Only 60 -> Intermediate is confirmed; add the others once you have checked them in game, e.g. \"100\": \"Lesser\". Percentages without a tier here are kept as '<Slot> <Stat> Scroll (N%)' so they never get a wrong name.",
+  "name_format": "{slot} {stat} Scroll: {tier}",
+  "fallback_format": "{slot} {stat} Scroll ({pct}%)",
+  "pct_to_tier": {
+    "60": "Intermediate"
+  },
+  "tier_words": {
+    "lesser": "Lesser",
+    "inter": "Intermediate",
+    "intermediate": "Intermediate",
+    "greater": "Greater",
+    "chaos": "Chaos"
+  },
+  "slots": {
+    "glove": "Gloves", "gloves": "Gloves", "glv": "Gloves", "gl": "Gloves",
+    "hat": "Hat", "helm": "Hat", "helmet": "Hat",
+    "top": "Topwear", "topwear": "Topwear",
+    "bottom": "Bottomwear", "bottoms": "Bottomwear", "btm": "Bottomwear", "pants": "Bottomwear", "bottomwear": "Bottomwear",
+    "overall": "Overall Armor", "overall armor": "Overall Armor", "ova": "Overall Armor", "ovr": "Overall Armor", "oa": "Overall Armor",
+    "pet equip": "Pet Equip", "pet": "Pet Equip",
+    "shoe": "Shoes", "shoes": "Shoes", "boot": "Shoes", "boots": "Shoes",
+    "cape": "Cape", "cloak": "Cape",
+    "ear": "Earring", "earring": "Earring", "earrings": "Earring",
+    "shield": "Shield",
+    "claw": "Claw", "dagger": "Dagger", "bow": "Bow", "xbow": "Crossbow", "crossbow": "Crossbow",
+    "wand": "Wand", "staff": "Staff", "spear": "Spear", "pole": "Polearm", "polearm": "Polearm",
+    "1h sword": "One-Handed Sword", "1hs": "One-Handed Sword", "2h sword": "Two-Handed Sword", "2hs": "Two-Handed Sword",
+    "1h axe": "One-Handed Axe", "2h axe": "Two-Handed Axe", "1h bw": "One-Handed Blunt Weapon", "2h bw": "Two-Handed Blunt Weapon",
+    "one hand sword": "One-Handed Sword", "one handed sword": "One-Handed Sword", "two hand sword": "Two-Handed Sword", "two handed sword": "Two-Handed Sword",
+    "one hand axe": "One-Handed Axe", "one handed axe": "One-Handed Axe", "two hand axe": "Two-Handed Axe", "two handed axe": "Two-Handed Axe",
+    "one hand bw": "One-Handed Blunt Weapon", "two hand bw": "Two-Handed Blunt Weapon"
+  },
+  "shorthand": {
+    "gfa": "glove att", "gfma": "glove matk"
+  },
+  "stats": {
+    "att": "Attack", "atk": "Attack", "watk": "Attack", "wa": "Attack", "attack": "Attack",
+    "matk": "Magic Attack", "matt": "Magic Attack", "ma": "Magic Attack", "magic att": "Magic Attack", "magic attack": "Magic Attack",
+    "m.att": "Magic Attack", "m. att": "Magic Attack", "m.atk": "Magic Attack", "magic atk": "Magic Attack",
+    "acc": "Accuracy", "accuracy": "Accuracy",
+    "avoid": "Avoidability", "avo": "Avoidability", "avoidability": "Avoidability",
+    "str": "STR", "dex": "DEX", "int": "INT", "luk": "LUK", "luck": "LUK",
+    "hp": "HP", "mp": "MP",
+    "speed": "Speed", "spd": "Speed", "jump": "Jump",
+    "def": "DEF", "wdef": "DEF", "mdef": "Magic Defense",
+    "crit": "Crit. Rate", "crit rate": "Crit. Rate", "critical": "Crit. Rate"
+  }
+}
