@@ -72,6 +72,7 @@ DEFAULTS = {
     "twitch_in_all": False,   # its chat in All too
     "tab": "All",
     "settings_page": "Appearance",  # the settings section open last
+    "menu_close_s": 10,       # the right-click menu closes after this many seconds (0: stays until clicked away)
     "box": None,              # the chat lines relative to the game window: dx, dy (from its bottom), w, h, line, cw, ch
     "extra": 0,               # pixels the panel reaches above the game's chat (dragged with the ≡ grip)
     "unlocked": False,        # placed anywhere you like instead of on the game's chat (it still reads the game's chat)
@@ -576,6 +577,43 @@ def resized(current: dict, found: dict, line: float, history: deque) -> dict | N
     return {**current, "top": target, "height": bottom - target}
 
 
+def pointer_away(rect: tuple, pt: tuple) -> int:
+    """How far the pointer is outside a rect (left, top, right, bottom): 0 on it."""
+    left, top, right, bottom = rect
+    return max(left - pt[0], pt[0] - right, top - pt[1], pt[1] - bottom, 0)
+
+
+def close_menu_when_left(open_: threading.Event, after_s: float = 10, far: int = 120, pointer=None) -> None:
+    """While a right-click menu is open (open_ set): close it, as Escape would, once the pointer
+    has moved well away from it (more than `far` pixels) or it has been up `after_s` seconds
+    (0: no time limit). A left click outside closes it anyway, as Windows menus do."""
+    import ctypes
+    import ctypes.wintypes as wt
+    u32 = ctypes.windll.user32
+    u32.FindWindowW.restype = ctypes.c_void_p
+
+    def cursor():
+        pt = wt.POINT()
+        u32.GetCursorPos(ctypes.byref(pt))
+        return pt.x, pt.y
+    pointer = pointer or cursor
+    start, menu = time.time(), None
+    while open_.is_set():
+        time.sleep(0.05)
+        h = u32.FindWindowW("#32768", None)  # the class of Windows' pop-up menus
+        if not h or not u32.IsWindowVisible(ctypes.c_void_p(h)):
+            if menu:
+                return  # closed
+            continue
+        menu = h
+        r = wt.RECT()
+        u32.GetWindowRect(ctypes.c_void_p(h), ctypes.byref(r))
+        rect = (r.left, r.top, r.right, r.bottom)
+        if pointer_away(rect, pointer(rect)) > far or (after_s and time.time() - start > after_s):
+            u32.PostMessageW(ctypes.c_void_p(h), 0x0100, 0x1B, 0)  # WM_KEYDOWN Escape
+            return
+
+
 def on_screen(r: dict) -> bool:
     """Whether a rect on screen is on one of the monitors (not off the edge, or on one unplugged since)."""
     import ctypes
@@ -972,7 +1010,7 @@ class ChatView:
         self.msgs.canvas.bind("<ButtonRelease-1>", self.on_release)
         for w in (self.msgs, self.strip):
             w.canvas.bind("<Motion>", self.on_motion)
-            w.canvas.bind("<Button-3>", self.menu)
+            w.canvas.bind("<ButtonRelease-3>", self.menu)  # on release: letting go can't pick an item
         self.scroll = 0            # messages scrolled up from the newest
         self.in_view = 1           # messages that fit at the last drawing
         self.bar = None            # what the mouse is doing on the scrollbar: ("thumb", grab offset) / ("repeat", step)
@@ -1156,9 +1194,14 @@ class ChatView:
             self.toggle_see_through(), self.render()))
         m.add_command(label="Adjust position (Ctrl+Alt+F5)", command=lambda: app.on_hotkey(HK_EDIT))
         m.add_command(label="Settings…", command=app.open_settings)
+        open_ = threading.Event()
+        open_.set()
+        threading.Thread(target=close_menu_when_left, args=(open_, float(self.opts["menu_close_s"] or 0)),
+                         daemon=True).start()
         try:
-            m.tk_popup(e.x_root, e.y_root)
+            m.tk_popup(e.x_root + 2, e.y_root + 2)  # just off the pointer, so nothing is under it
         finally:
+            open_.clear()
             m.grab_release()
 
     def on_grip_drag(self, e) -> None:
@@ -1356,6 +1399,7 @@ class ExtraChat(ChatView):
             c.bind("<ButtonRelease-1>", self.on_div_release)
             c.bind("<Enter>", lambda e: self.draw_div(True))
             c.bind("<Leave>", lambda e: self.draw_div(False))
+            c.bind("<ButtonRelease-3>", self.menu)
         self.apply_see_through()
 
     # a split's divider --------------------------------------------------------

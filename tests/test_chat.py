@@ -384,3 +384,10 @@ def test_another_window_has_its_own_tab_on_the_same_chat():
     assert [m["name"] for m in log.visible()] == ["Kestrel"] and [m["name"] for m in side.visible()] == ["Rowan"]
     assert log.unread["All"] and not side.unread["All"] and side.unread["Mega"]  # each its own dots
     assert len(side.messages) == 2  # one chat: added once, seen in both
+
+
+def test_the_right_click_menu_closes_once_the_pointer_is_well_away():
+    menu = (100, 100, 300, 260)
+    assert mc.pointer_away(menu, (150, 200)) == 0  # on it
+    assert mc.pointer_away(menu, (350, 200)) == 50  # just beside it: stays open (under 120)
+    assert mc.pointer_away(menu, (150, 420)) == 160  # well below it: closes

@@ -310,10 +310,25 @@ class SettingsWindow:
         entry(c, names, 40).pack(anchor="w", ipady=2)
         names.trace_add("write", set_names)
 
-        c = card(page, "Sounds")
+        c = card(page, "Sounds and menus")
         sound = tk.BooleanVar(value=opts["whisper_sound"])
         check(c, "Chime when a whisper arrives", sound, lambda: app.set_opt("whisper_sound", sound.get())).pack(
             fill="x")
+        row = tk.Frame(c, bg=CARD)
+        row.pack(fill="x", pady=(8, 0))
+        label(row, "Close the right-click menu after").pack(side="left")
+        secs = tk.StringVar(value=str(opts["menu_close_s"] or 0))
+
+        def set_secs(*_):
+            try:
+                app.set_opt("menu_close_s", max(0, int(float(secs.get()))))
+            except ValueError:
+                pass
+        tk.Spinbox(row, from_=0, to=120, width=4, textvariable=secs, command=set_secs, bg=FIELD, fg=INK,
+                   insertbackground=INK, buttonbackground=BORDER, relief="flat", highlightthickness=1,
+                   highlightbackground=BORDER, highlightcolor=ACCENT, font=(UI, 10)).pack(side="left", padx=6)
+        secs.trace_add("write", set_secs)
+        label(row, "seconds (0: until clicked away)", soft=True, size=9).pack(side="left")
 
     def tabs(self, page) -> None:
         app, opts = self.app, self.opts

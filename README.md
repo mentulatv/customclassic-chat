@@ -94,7 +94,8 @@ position, Unlocked (place it anywhere), Reset position, Split the chat, New chat
 See-through, Settings…, Quit.
 
 **Right-click any chat window** for Split the chat, New chat window, Close this window,
-See-through, Adjust position and Settings….
+See-through, Adjust position and Settings…. The menu closes when you click elsewhere, move the
+pointer well away from it, or after 10 seconds (Settings → Chat; 0 keeps it open).
 
 **Split the chat:** click **+** at the right end of the tab row (or right-click, the tray menu,
 or Settings → Tabs). A second pane appears on
