@@ -408,9 +408,3 @@ def test_guild_chat_switches_on_with_its_colour_alone():
     buddy = {**m, "kind": "buddy"}
     assert all(guild_relay.relay_line(buddy, s) is None for s, _ in guild_relay.SOURCES)
     assert guild_relay.relay_line({**m, "kind": "map"}, "map")["kind"] == "map"  # testing with map chat
-
-
-def test_guild_codes_are_read_forgivingly():
-    import guild_relay
-    assert guild_relay.guild_code(" abcd efgh ") == "ABCD-EFGH" == guild_relay.guild_code("ABCD-EFGH")
-    assert guild_relay.guild_code("ABC-1234") == ""  # 0, 1, O and I aren't used: easy to read out

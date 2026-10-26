@@ -157,30 +157,46 @@ own name colour, and in All too if you tick **Show it in All too**. The custom t
 as well. CustomClassic Chat reads the chat as a guest, the way anyone can watch a channel's chat
 without logging in: no account, key or password, and it never writes in the chat.
 
-## Guild chat relay to Discord (opt-in)
+## Guild chat to Discord (opt-in, peer to peer)
 
-Your guild's chat in your guild's Discord channel, and that channel back in a **Discord** tab.
+Your guild's chat in your guild's Discord channel, and that channel back in a **Discord** tab,
+with **no server of anyone's in between**: the members' own apps share the chat with each other.
 
-- **Whoever runs the guild's Discord** sets it up once: in the channel's settings, *Integrations →
-  Webhooks → New Webhook → Copy Webhook URL*, then in CustomClassic Chat *Settings → Discord → Set
-  up a relay for your guild*, paste it and press **Create the relay**. That gives a **guild code**
-  (like `ABCD-EFGH`) to hand out. The webhook link stays on the relay; members never see it.
-- **Members** paste the guild code in *Settings → Discord*, then tick **Share my guild chat** and/or
-  **Show the guild's Discord channel in a Discord tab**.
+**Setting up (once, by whoever runs the guild's Discord):** *Settings → Guild setup*.
+1. A webhook for the channel: *Edit Channel → Integrations → Webhooks → New Webhook → Copy
+   Webhook URL*.
+2. Optionally a bot, for the Discord tab and `!guildcode`: discord.com/developers → New
+   Application → Bot, copy its token and switch on *Message Content Intent*. The app then offers
+   the link that adds the bot to your server (it only asks to read the channel). The token stays
+   on that PC.
+3. The guild's name, and how members join: with a **guild code** (`ABCD-EFGH-JKLM`, safer) or
+   with **the guild's name** (easier, but anyone who knows the name can read the shared chat and
+   post to the channel).
 
-**Any number of members can share without duplicates.** Every message carries the game's own time
-stamp, which is server time and the same on every screen, so the relay knows when several members
-read the same message: same minute, same speaker, nearly the same text. It waits about two seconds
-for everyone's reading, then posts the version most of them read, once (text recognition's slips,
-like "rn" for "m", lose). More members sharing means fewer gaps, never more copies.
+**Create** posts how to join in the channel. Players can also type `!guildcode` there while the
+admin's app runs with a bot.
 
-**What is sent:** only guild chat, with the speaker's name and the game's time stamp. Never
-whispers, party, buddy or map chat, and nothing is ever typed into the game: messages from Discord
-only show in the Discord tab. Guild chat waits on the relay a few seconds in memory and isn't
-stored. Ask your guild before turning it on.
+**Joining:** *Settings → Discord*, enter the code (or name), then tick **Share my chat** and/or
+**Show the guild's Discord channel in a Discord tab**.
 
-> Guild chat has to be told apart from buddy chat by its colour first. Until that colour is
-> measured, nothing is shared (Settings → Discord says so).
+**How it works:** the apps meet on a channel at two free public message brokers (MQTT, the kind
+smart-home devices use), named and encrypted from the guild code: only members can find or read
+it, the brokers just pass sealed messages along, and with two of them one being down doesn't
+matter. Every app announces the lines it reads with the game's own time stamp (server time, the
+same on every screen). After a few seconds every app has heard everyone's reading of a message,
+matches them up the same way (same minute, same speaker, nearly the same text) and agrees on the
+best wording (text recognition's slips, like "rn" for "m", lose) and on who posts it: the member
+with the lowest id among those who read it. That one app posts it; the others stay quiet. More
+members sharing means fewer gaps, never more copies. The admin's app keeps the guild's details
+on the channel for new members and, with a bot, reads the Discord channel for everyone's
+Discord tab.
+
+**What is sent:** only the one kind of chat chosen, with the speaker's name and the game's time
+stamp: guild chat, or, to try it before the game has guild chat, map chat or whispers (posts say
+which). Never anything else, and nothing is ever typed into the game. Ask your guild first.
+
+> The game doesn't have guild chat yet. When it does, guild chat needs one thing: its text colour
+> (`guild = [r, g, b]` under `[colors]`), measured from one screenshot. Everything else is ready.
 
 ## Watch list
 
@@ -230,7 +246,7 @@ asked for; the game's process is never opened.
 | `customclassic_chat.py` | the panel, tabs and the reading loop |
 | `settings_ui.py` | the settings window |
 | `twitch_chat.py` | Twitch chat, read as a guest |
-| `guild_relay.py` | the guild chat relay to Discord, from the app's side |
+| `guild_relay.py` | guild chat to Discord, peer to peer |
 | `reader.py` | text recognition and chat colours |
 | `watch.py` | the watch list |
 | `trade_parser.py`, `data/` | reads prices in megaphones (from the Maple Price Index) |

@@ -18,7 +18,7 @@ BG, SIDE, CARD, FIELD = "#111827", "#0b1120", "#172033", "#0b1120"
 BORDER, ACCENT, ACCENT_HI = "#2a3654", "#3d6fd1", "#4f80e0"
 INK, SOFT, WARN = "#eef3fb", "#8f9db5", "#ffc24b"
 UI = "Segoe UI"
-PAGES = ["Appearance", "Position", "Chat", "Tabs", "Twitch", "Discord", "Watch list"]
+PAGES = ["Appearance", "Position", "Chat", "Tabs", "Twitch", "Discord", "Guild setup", "Watch list"]
 
 
 # ------------------------------------------------------------------ widgets in one style
@@ -127,7 +127,7 @@ class SettingsWindow:
         self.content.pack_propagate(False)
         self.pages: dict[str, tk.Frame] = {}
         for name, build in zip(PAGES, (self.appearance, self.position, self.chat, self.tabs, self.twitch,
-                                       self.discord, self.watch_list)):
+                                       self.discord, self.guild_setup, self.watch_list)):
             page = tk.Frame(self.content, bg=BG)
             label(page, name, size=15, bold=True, bg=BG).pack(fill="x", pady=(0, 14))
             build(page)
@@ -407,150 +407,166 @@ class SettingsWindow:
                        "Off. Tick Show Twitch chat to turn it on.")
 
     def discord(self, page) -> None:
-        """The guild chat relay: join with a guild code, or set one up for the guild."""
+        """Joining the guild's chat-to-Discord with its code (or name), and what to share or see."""
         app, opts, top = self.app, self.opts, self.top
-        base = app.relay_base()
-        code = tk.StringVar(value=opts["relay_code"])
+        code = tk.StringVar(value=guild_relay.key_label(opts["relay_code"]))
         share = tk.BooleanVar(value=opts["relay_share"])
         tab = tk.BooleanVar(value=opts["relay_tab"])
         source = tk.StringVar(value=opts["relay_source"] if opts["relay_source"] in dict(guild_relay.SOURCES)
                               else "guild")
-
-        def later(fn, *args, then=None):
-            """Ask the relay without freezing the window; `then` gets the answer (or the error)."""
-            def work():
-                try:
-                    out = fn(*args)
-                except Exception as e:  # shown to the user as it is
-                    out = e
-                if then:
-                    top.after(0, lambda: top.winfo_exists() and then(out))
-            threading.Thread(target=work, daemon=True).start()
-
-        c = card(page, "Guild chat relay", "Your guild's chat in the guild's Discord channel, posted once however "
-                                           "many members share it, and that channel back in a Discord tab. Only the "
-                                           "one kind of chat picked below is sent, nothing else. Off until you turn "
-                                           "it on; ask your guild first.")
+        c = card(page, "Your guild's chat on Discord", "Members' apps share the guild's chat with each other "
+                                                       "directly (no server of anyone's in between) and post each "
+                                                       "message to the guild's Discord channel once. Only the one "
+                                                       "kind of chat picked below is sent. Off until you turn it on.")
         row = tk.Frame(c, bg=CARD)
         row.pack(fill="x")
-        label(row, "Guild code").pack(side="left")
-        field = entry(row, code, 12)
+        label(row, "Guild code or name").pack(side="left")
+        field = entry(row, code, 18)
         field.pack(side="left", padx=8, ipady=2)
         note = label(c, "", soft=True, size=9, wrap=470)
-
-        def show_guild(info):
-            if isinstance(info, dict):
-                extra = "" if info.get("discord_tab") else " (The relay can't read Discord yet, so the Discord tab stays empty.)"
-                note.configure(text=f"Guild: {info['name']}.{extra}", fg=SOFT)
-            else:
-                note.configure(text="The relay doesn't know that guild code." if info is None else
-                               "Can't reach the relay right now.", fg=WARN)
-
-        def use(*_):
-            value = guild_relay.guild_code(code.get())
-            if code.get().strip() and not value:
-                note.configure(text="A guild code looks like ABCD-EFGH.", fg=WARN)
-                return
-            code.set(value)
-            app.set_relay(value, share.get(), tab.get(), source.get())
-            show_waiting()
-            if value:
-                note.configure(text="Checking the code…", fg=SOFT)
-                later(guild_relay.guild_info, base, value, then=show_guild)
-            else:
-                note.configure(text="No guild relay.", fg=SOFT)
-            show_admin()
-        button(row, "Use", use).pack(side="left")
-        field.bind("<Return>", use)
-        check(c, "Share my chat with the relay:", share, use).pack(fill="x", pady=(8, 0))
-        row = tk.Frame(c, bg=CARD)
-        row.pack(fill="x", padx=(22, 0))
-        for value, text in guild_relay.SOURCES:
-            radio(row, text, source, value, use).pack(side="left", padx=(0, 12))
-        check(c, "Show the guild's Discord channel in a Discord tab", tab, use).pack(fill="x", pady=(4, 0))
         waiting = label(c, "", size=9, wrap=470)
         waiting.configure(fg=WARN)
 
         def show_waiting():
             if source.get() == "guild" and not app.guild_colour_known():
                 waiting.configure(text="The game doesn't have guild chat yet, so nothing is shared as guild chat. "
-                                       "To try the relay meanwhile, share map chat or whispers.")
-                waiting.pack(fill="x", pady=(6, 0), before=note)
+                                       "To try it meanwhile, share map chat or whispers.")
             elif source.get() != "guild":
-                waiting.configure(text=f"Testing: your {dict(guild_relay.SOURCES)[source.get()].split(' (')[0].lower()} "
-                                       "goes to the guild's Discord, labelled as such. Switch back to guild chat when "
-                                       "the game has it.")
-                waiting.pack(fill="x", pady=(6, 0), before=note)
+                kind = dict(guild_relay.SOURCES)[source.get()].split(" (")[0].lower()
+                waiting.configure(text=f"Testing: your {kind} goes to the guild's Discord, labelled as such. "
+                                       "Switch back to guild chat when the game has it.")
             else:
-                waiting.pack_forget()
+                waiting.configure(text="")
+
+        def show_status():
+            key = guild_relay.guild_key(code.get())
+            if not key:
+                note.configure(text="Not in a guild's chat." if not code.get().strip() else
+                               "That's neither a guild code (ABCD-EFGH-JKLM) nor a guild name.", fg=SOFT)
+                return
+            cfg = opts["relay_cfg"].get(key) or opts["relay_admin"].get(key) or {}
+            peer = app.relay
+            if not peer:
+                note.configure(text="Tick sharing or the Discord tab to join.", fg=SOFT)
+                return
+            online = peer.members()
+            name = cfg.get("name") or peer.cfg.get("name")
+            where = f"Guild {name}: " if name else "Waiting for the guild's details from its admin's app… "
+            note.configure(text=where + f"{online} member{'s' if online != 1 else ''}' app{'s' if online != 1 else ''} "
+                                "online here.", fg=SOFT)
+
+        def use(*_):
+            key = guild_relay.guild_key(code.get())
+            if code.get().strip() and not key:
+                show_status()
+                return
+            app.set_relay(key, share.get(), tab.get(), source.get())
+            code.set(guild_relay.key_label(key))
+            show_waiting()
+            note.configure(text="Joining…" if app.relay else "", fg=SOFT)
+            top.after(5000, lambda: top.winfo_exists() and show_status())
+        button(row, "Join", use).pack(side="left")
+        field.bind("<Return>", use)
+        check(c, "Share my chat:", share, use).pack(fill="x", pady=(8, 0))
+        row = tk.Frame(c, bg=CARD)
+        row.pack(fill="x", padx=(22, 0))
+        for value, text in guild_relay.SOURCES:
+            radio(row, text, source, value, use).pack(side="left", padx=(0, 12))
+        check(c, "Show the guild's Discord channel in a Discord tab", tab, use).pack(fill="x", pady=(4, 0))
+        waiting.pack(fill="x", pady=(6, 0))
         note.pack(fill="x", pady=(4, 0))
         show_waiting()
-        if guild_relay.guild_code(opts["relay_code"]):
-            later(guild_relay.guild_info, base, guild_relay.guild_code(opts["relay_code"]), then=show_guild)
+        show_status()
 
-        c = card(page, "Set up a relay for your guild",
-                 "For whoever runs the guild's Discord: in the channel's settings, Integrations → Webhooks → New "
-                 "Webhook → Copy Webhook URL, and paste it here. You get the guild code to give your members. The "
-                 "link stays on the relay: members never see it.")
+        c = card(page, "No code yet?", "Ask in your guild's Discord: the code was posted there when the guild was "
+                                       "set up, and if the guild has the bot, typing !guildcode in the channel "
+                                       "brings it back. Some guilds join with their name instead of a code.")
+
+    def guild_setup(self, page) -> None:
+        """For whoever runs the guild's Discord: a guild for its members' apps, step by step."""
+        app, opts, top = self.app, self.opts, self.top
+        hook, bot, gname = tk.StringVar(), tk.StringVar(), tk.StringVar()
+        by_name = tk.BooleanVar(value=False)
+        c = card(page, "1. A webhook for the channel", "In the Discord channel for guild chat: Edit Channel → "
+                                                       "Integrations → Webhooks → New Webhook → Copy Webhook URL.")
+        f = entry(c, hook, 52)
+        f.configure(show="•")  # a secret: anyone holding it can post in the channel
+        f.pack(anchor="w", ipady=2)
+        c = card(page, "2. A bot (optional)", "For the Discord tab and !guildcode. discord.com/developers → New "
+                                              "Application → Bot: Reset Token and copy it, and switch on Message "
+                                              "Content Intent. The token stays on this PC.")
+        row = tk.Frame(c, bg=CARD)
+        row.pack(fill="x")
+        f = entry(row, bot, 34)
+        f.configure(show="•")
+        f.pack(side="left", ipady=2)
+        invite = button(row, "Add the bot to your server", lambda: None)
+
+        def show_invite(*_):
+            link = guild_relay.bot_invite(bot.get())
+            if link:
+                invite.configure(command=lambda: __import__("webbrowser").open(link))
+                invite.pack(side="left", padx=(8, 0))
+            else:
+                invite.pack_forget()
+        bot.trace_add("write", show_invite)
+        c = card(page, "3. The guild", "")
         row = tk.Frame(c, bg=CARD)
         row.pack(fill="x")
         label(row, "Guild name").pack(side="left")
-        gname = tk.StringVar()
-        entry(row, gname, 16).pack(side="left", padx=8, ipady=2)
+        entry(row, gname, 18).pack(side="left", padx=8, ipady=2)
         row = tk.Frame(c, bg=CARD)
         row.pack(fill="x", pady=(6, 0))
-        label(row, "Webhook link").pack(side="left")
-        hook = tk.StringVar()
-        hook_field = entry(row, hook, 34)
-        hook_field.configure(show="•")  # a secret: anyone holding it can post in the channel
-        hook_field.pack(side="left", padx=8, ipady=2)
-        made = label(c, "", soft=True, size=9, wrap=470)
-        buttons = tk.Frame(c, bg=CARD)
-        buttons.pack(fill="x", pady=(8, 0))
+        label(row, "Members join with").pack(side="left")
+        radio(row, "a guild code (safer)", by_name, False, lambda: None).pack(side="left", padx=(8, 0))
+        radio(row, "the guild's name (easier)", by_name, True, lambda: None).pack(side="left", padx=(8, 0))
+        label(c, "With the name, anyone who knows it can read the shared chat and post to the channel.", soft=True,
+              size=9, wrap=470).pack(fill="x", pady=(2, 0))
+        row = tk.Frame(page, bg=BG)
+        row.pack(fill="x")
+        made = label(page, "", soft=True, size=9, wrap=520, bg=BG)
 
         def created(out):
             if isinstance(out, Exception):
-                made.configure(text=str(out) or "Can't reach the relay right now.", fg=WARN)
+                made.configure(text=str(out) or "Something went wrong; try again.", fg=WARN)
                 return
-            opts["relay_admin"] = {**opts["relay_admin"], out["code"]: out["admin_key"]}
+            key = out.pop("code")
+            opts["relay_admin"] = {**opts["relay_admin"], key: out}
             hook.set("")
-            code.set(out["code"])
-            use()
+            bot.set("")
+            app.set_relay(key, opts["relay_share"], opts["relay_tab"])
             top.clipboard_clear()
-            top.clipboard_append(out["code"])
-            made.configure(text=f"Done: guild code {out['code']} (copied). Give it to your members. A note went to "
-                                "the Discord channel to say the relay is connected.", fg=INK)
+            top.clipboard_append(guild_relay.key_label(key))
+            made.configure(text=f"Done. Members join with {guild_relay.key_label(key)} (copied); how to join is posted "
+                                "in the channel. Keep this app running now and then: it keeps the guild's details "
+                                "on the channel for new members" + (", and reads Discord for the Discord tab." if
+                                                                     out.get("bot") else "."), fg=INK)
 
         def create():
             if len(gname.get().strip()) < 2 or not hook.get().strip():
-                made.configure(text="Type the guild's name and paste the webhook link.", fg=WARN)
+                made.configure(text="Paste the webhook link and type the guild's name.", fg=WARN)
                 return
             made.configure(text="Setting it up…", fg=SOFT)
-            later(guild_relay.create_guild, base, gname.get().strip(), hook.get().strip(), then=created)
-        button(buttons, "Create the relay", create, primary=True).pack(side="left")
 
-        def removed(out):
-            if out is True:
-                opts["relay_admin"] = {k: v for k, v in opts["relay_admin"].items() if k != code.get()}
-                code.set("")
-                use()
-                made.configure(text="The relay is removed: members' apps stop sending.", fg=SOFT)
-            else:
-                made.configure(text="Couldn't remove it right now.", fg=WARN)
+            def work():
+                try:
+                    out = guild_relay.create_guild(gname.get(), hook.get(), bot.get(), by_name.get())
+                except Exception as e:  # shown as it is
+                    out = e
+                top.after(0, lambda: top.winfo_exists() and created(out))
+            threading.Thread(target=work, daemon=True).start()
+        button(row, "Create", create, primary=True).pack(side="left")
 
-        def remove():
-            key = opts["relay_admin"].get(code.get())
-            if key:
-                later(guild_relay.remove_guild, base, code.get(), key, then=removed)
-        remove_btn = button(buttons, "Remove this relay", remove)
-
-        def show_admin():
-            if opts["relay_admin"].get(guild_relay.guild_code(code.get())):
-                remove_btn.pack(side="left", padx=(8, 0))
-            else:
-                remove_btn.pack_forget()
-        show_admin()
-        made.pack(fill="x", pady=(6, 0))
+        def close():
+            key = guild_relay.guild_key(opts["relay_code"])
+            if app.relay and key in opts["relay_admin"]:
+                app.relay.close_guild()
+                opts["relay_admin"] = {k: v for k, v in opts["relay_admin"].items() if k != key}
+                app.set_relay("", False, False)
+                made.configure(text="Closed: members' apps stop sending to it.", fg=SOFT)
+        if guild_relay.guild_key(opts["relay_code"]) in opts["relay_admin"]:
+            button(row, "Close this guild", close).pack(side="left", padx=(8, 0))
+        made.pack(fill="x", pady=(8, 0))
 
     def watch_list(self, page) -> None:
         app, opts = self.app, self.opts

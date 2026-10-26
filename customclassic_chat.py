@@ -71,13 +71,13 @@ DEFAULTS = {
     "twitch_on": False,       # opt in: a Twitch channel's chat in a Twitch tab
     "twitch_channel": "",     # which channel
     "twitch_in_all": False,   # its chat in All too
-    "relay_code": "",         # opt in: the guild relay's guild code (guild chat to Discord, the Discord channel back)
-    "relay_share": False,     # send the guild chat this app reads to the relay
+    "relay_code": "",         # opt in: the guild's code (guild chat to Discord peer to peer, the channel back)
+    "relay_share": False,     # share the guild chat this app reads with the guild's other apps
     "relay_source": "guild",  # what's shared: "guild"; "map" or "whisper" only to test before the game has guild chat
     "relay_tab": False,       # the guild's Discord channel in a Discord tab
-    "relay_reader": "",       # this install's random id for the relay (no name)
-    "relay_admin": {},        # guild code -> admin key, for relays set up from here (to remove them)
-    "relay_url": None,        # the relay; None: the public one
+    "relay_reader": "",       # this install's random id among the guild's apps (no name)
+    "relay_cfg": {},          # guild code -> the guild's details as last heard (its name and Discord webhook)
+    "relay_admin": {},        # guild code -> guilds set up from here: name, webhook, and the Discord bot token if any
     "tab": "All",
     "settings_page": "Appearance",  # the settings section open last
     "menu_close_s": 10,       # the right-click menu closes after this many seconds (0: stays until clicked away)
@@ -1904,6 +1904,10 @@ class ChatPanel(ChatView):
                     changed = True
                 elif kind == "settings":
                     self.open_settings()
+                elif kind == "relay_cfg":  # the guild's details, heard on its channel: kept for next time
+                    code, cfg = data
+                    self.opts["relay_cfg"] = {**self.opts["relay_cfg"], code: cfg}
+                    save_settings(self.opts)
                 elif kind == "covered":
                     self.covered = data
                 elif kind == "status":
@@ -2040,7 +2044,7 @@ class ChatPanel(ChatView):
     def tabs(self) -> list:
         o = self.opts
         return tabs_for(o["custom_tab"], self.twitch_channel() is not None, o["twitch_in_all"],
-                        bool(o["relay_tab"] and guild_relay.guild_code(o["relay_code"])))
+                        bool(o["relay_tab"] and guild_relay.guild_key(o["relay_code"])))
 
     def retab(self, rename: tuple[str | None, str | None] = (None, None)) -> None:
         """The tabs again after a setting changed; a renamed tab that was open stays open."""
@@ -2071,21 +2075,21 @@ class ChatPanel(ChatView):
         import reader
         return "guild" in reader.Config.load().colors
 
-    def relay_base(self) -> str:
-        return (self.opts["relay_url"] or guild_relay.RELAY_URL).rstrip("/")
-
     def start_relay(self) -> None:
-        """Connect to the guild relay set in Settings, if opted into sharing or the Discord tab."""
+        """Join the guild's channel set in Settings: when sharing, showing the Discord tab, or as
+        the guild's admin (whose app keeps the guild's details there and reads Discord for all)."""
         if self.relay:
             self.relay.stop()
             self.relay = None
-        o, code = self.opts, guild_relay.guild_code(self.opts["relay_code"])
-        if code and (o["relay_share"] or o["relay_tab"]) and not self.demo:
-            self.relay = guild_relay.RelayClient(self.relay_base(), code, o["relay_reader"], self.events.put,
-                                                 o["relay_share"], o["relay_tab"], o["relay_source"])
+        o, code = self.opts, guild_relay.guild_key(self.opts["relay_code"])
+        admin = o["relay_admin"].get(code) if code else None
+        if code and (o["relay_share"] or o["relay_tab"] or admin) and not self.demo:
+            self.relay = guild_relay.GuildPeer(code, o["relay_reader"], self.events.put, o["relay_share"],
+                                               o["relay_tab"], o["relay_source"], cfg=o["relay_cfg"].get(code),
+                                               admin=admin)
 
     def set_relay(self, code: str, share: bool, tab: bool, source: str | None = None) -> None:
-        self.opts["relay_code"] = guild_relay.guild_code(code)
+        self.opts["relay_code"] = guild_relay.guild_key(code)
         self.opts["relay_share"], self.opts["relay_tab"] = share, tab
         if source in dict(guild_relay.SOURCES):
             self.opts["relay_source"] = source
