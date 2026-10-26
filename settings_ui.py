@@ -361,7 +361,7 @@ class SettingsWindow:
     def watch_list(self, page) -> None:
         app, opts = self.app, self.opts
         c = card(page, "Look out for", "A chime and a note when a megaphone mentions one of these. Items can "
-                                       "have conditions: sellers only, a highest price, or under the usual price.")
+                                       "have conditions: sellers only, and a price range you set.")
         row = tk.Frame(c, bg=CARD)
         row.pack(fill="x")
         box = tk.Listbox(row, height=7, bg=FIELD, fg=INK, selectbackground=ACCENT, selectforeground=INK,
@@ -434,7 +434,7 @@ class WatchEntryDialog:
         except Exception:
             pass
 
-        c = card(dlg, "A word or an item", "Item names come from the price site, with what they usually sell for.")
+        c = card(dlg, "A word or an item", "Start typing for item names, and the shorthands chat uses for them.")
         text = tk.StringVar(value=old.text)
         field = entry(c, text, 44)
         field.pack(fill="x", ipady=3)
@@ -451,30 +451,32 @@ class WatchEntryDialog:
                     hints.insert("end", name)
             item = app.watcher.catalog.resolve(text.get())
             if item:
-                usual = f", usually sells for {w.money(item['usual'])}" if item.get("usual") else ""
                 also = f"; also finds {', '.join(item['aliases'][:4])}" if item.get("aliases") else ""
-                known.configure(text=f"Item: {item['name']}{usual}{also}")
+                known.configure(text=f"Item: {item['name']}{also}")
             elif not app.watcher.catalog.items:
-                known.configure(text="Item names aren't loaded (price site unreachable): matched as written.")
+                known.configure(text="Item names aren't loaded (no connection yet): matched as written.")
             else:
-                known.configure(text="Not an item the price site knows: matched as a word.")
+                known.configure(text="Not a known item name: matched as a word.")
         text.trace_add("write", typed)
         hints.bind("<<ListboxSelect>>", lambda e: hints.curselection() and text.set(hints.get(hints.curselection()[0])))
         typed()
         exact = tk.BooleanVar(value=old.exact)
         check(c, "This exact word only (no close spellings)", exact).pack(fill="x", pady=(6, 0))
 
-        c = card(dlg, "Only when…", "These read the megaphone's price the way the price site does.")
+        c = card(dlg, "Only when…", "These read the megaphone's price the way the price site does. Leave a "
+                                    "price empty for no limit on that side.")
         sellers = tk.BooleanVar(value=old.sellers_only)
         check(c, "Someone is selling it (S>), not buying", sellers).pack(fill="x")
         row = tk.Frame(c, bg=CARD)
-        row.pack(fill="x", pady=(6, 0))
-        label(row, "It costs at most").pack(side="left")
+        row.pack(fill="x", pady=(8, 0))
+        label(row, "It costs between").pack(side="left")
+        low = tk.StringVar(value=w.money(old.min_price) if old.min_price else "")
         top = tk.StringVar(value=w.money(old.max_price) if old.max_price else "")
-        entry(row, top, 9).pack(side="left", padx=8, ipady=2)
-        label(row, "mesos each, like 1.5m or 400k", soft=True, size=9).pack(side="left")
-        under = tk.BooleanVar(value=old.under_usual)
-        check(c, "It's well under the usual price (20% or more below)", under).pack(fill="x", pady=(6, 0))
+        entry(row, low, 8).pack(side="left", padx=6, ipady=2)
+        label(row, "and").pack(side="left")
+        entry(row, top, 8).pack(side="left", padx=6, ipady=2)
+        label(row, "mesos each", soft=True, size=9).pack(side="left")
+        label(c, "Like 400k, 1.5m or 250000.", soft=True, size=9).pack(fill="x", pady=(4, 0))
 
         problem = label(dlg, "", bg=BG, size=9)
         problem.configure(fg=WARN)
@@ -482,19 +484,19 @@ class WatchEntryDialog:
 
         def save():
             name = text.get().strip()
-            price = w.parse_price(top.get()) if top.get().strip() else None
+            lo = w.parse_price(low.get()) if low.get().strip() else None
+            hi = w.parse_price(top.get()) if top.get().strip() else None
             if not name:
                 problem.configure(text="Type a word or an item name.")
                 return
-            if top.get().strip() and not price:
-                problem.configure(text="The price should look like 1.5m, 400k or 250000.")
+            if (low.get().strip() and not lo) or (top.get().strip() and not hi):
+                problem.configure(text="Prices should look like 1.5m, 400k or 250000.")
                 return
+            if lo and hi and lo > hi:
+                lo, hi = hi, lo  # typed the other way round
             item = app.watcher.catalog.resolve(name)
-            if under.get() and not (item and item.get("usual")):
-                problem.configure(text="The usual price is only known for items the price site has sales for.")
-                return
-            new = w.Entry(item["name"] if item and (sellers.get() or price or under.get()) else name,
-                          exact.get(), sellers.get(), price, under.get(), old.on)
+            new = w.Entry(item["name"] if item and (sellers.get() or lo or hi) else name,
+                          exact.get(), sellers.get(), hi, lo, old.on)
             entries = list(app.watcher.entries)
             if index is None:
                 entries.append(new)

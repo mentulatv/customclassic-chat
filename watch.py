@@ -2,11 +2,11 @@
 
 An entry is a word or an item name. On its own it fires on any megaphone that mentions it
 (close spellings count, so "mushrnom" from a blurry read still finds "mushmom", unless the
-entry asks for the exact word). Give it a condition (sellers only, a highest price, or
-"well under the usual price") and it reads the megaphone like the price site does: its
-own parser (trade_parser.py) finds what's sold or bought at what price, and the item names
-and usual prices come from the price site's /api/names (kept for an hour in
-cache/names.json, so it works offline from the last copy).
+entry asks for the exact word). Give it a condition (sellers only, or a price range you set)
+and it reads the megaphone like the price site does: its own parser (trade_parser.py) finds
+what's sold or bought at what price. Item names and the shorthands chat uses for them come
+from the price site's /api/names (kept for an hour in cache/names.json, so it works offline
+from the last copy); prices are only ever the ones you type.
 
 Nothing here touches the game: it only looks at messages Maple Chat already read.
 """
@@ -30,7 +30,6 @@ NAMES_URL = "https://mapleprice.mentula.tv/api/names"
 NAMES_EVERY = 3600
 FUZZY = 88  # how close a spelling must be to count
 REPEAT_S = 600  # the same entry and player alert once per 10 minutes
-UNDER = 0.8  # "well under the usual price": at most 80% of it
 
 
 def norm(text: str) -> str:
@@ -72,7 +71,7 @@ def parse_price(text: str) -> int | None:
 
 
 class Catalog:
-    """The price server's item names, the other ways chat writes them, and usual prices."""
+    """The price server's item names and the other ways chat writes them."""
 
     def __init__(self, items: list[dict] | None = None):
         self.items = items or []
@@ -148,12 +147,19 @@ class Entry:
     exact: bool = False  # only the whole word as written, no close spellings
     sellers_only: bool = False  # only "S>" / selling megaphones
     max_price: int | None = None  # only when it's offered at this or less
-    under_usual: bool = False  # only well under the usual sale price
+    min_price: int | None = None  # only when it's offered at this or more (leaves out "1k" typos and junk)
     on: bool = True
 
     @property
     def reads_price(self) -> bool:
-        return self.sellers_only or bool(self.max_price) or self.under_usual
+        return self.sellers_only or bool(self.max_price) or bool(self.min_price)
+
+    def price_range(self) -> str:
+        """'100k–1.5m', '≤ 1.5m', '≥ 100k' or ''."""
+        lo, hi = self.min_price, self.max_price
+        if lo and hi:
+            return f"{money(lo)}–{money(hi)}"
+        return f"≤ {money(hi)}" if hi else (f"≥ {money(lo)}" if lo else "")
 
     def label(self) -> str:
         bits = [self.text]
@@ -161,10 +167,8 @@ class Entry:
             bits.append("exact")
         if self.sellers_only:
             bits.append("sellers")
-        if self.max_price:
-            bits.append(f"≤ {money(self.max_price)}")
-        if self.under_usual:
-            bits.append("under usual")
+        if self.price_range():
+            bits.append(self.price_range())
         return " · ".join(bits)
 
     @classmethod
@@ -270,18 +274,16 @@ class Watcher:
                 continue
             if e.sellers_only and o.intent != "sell":
                 continue
-            if o.price_kind in ("current_offer", "starting_bid") and (e.max_price or e.under_usual):
+            if o.price_kind in ("current_offer", "starting_bid") and (e.max_price or e.min_price):
                 continue  # an auction's offer so far, not a price you can buy at
             price = o.unit_price or None
             if e.max_price and (not price or price > e.max_price):
                 continue
-            usual = (item or {}).get("usual")
-            if e.under_usual and (not price or not usual or o.variant not in ("", "clean") or price > usual * UNDER):
+            if e.min_price and (not price or price < e.min_price):
                 continue
             verb = "selling" if o.intent == "sell" else "buying"
             where = f" for {money(price)}" + (" each" if o.qty > 1 else "") if price else ""
-            note = f" (usual {money(usual)})" if usual and price else ""
-            return f"{verb} {e.text}{where}{note}"
+            return f"{verb} {e.text}{where}"
         return None
 
 

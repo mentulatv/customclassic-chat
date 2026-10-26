@@ -65,7 +65,7 @@ DEFAULTS = {
     "watch_map": False,       # also look in map chat, not only megaphones
     "watch_sound": True, "watch_popup": True,  # a hit chimes and pops up a note by the panel
     "ignore_names": [],       # your character names: their name tags behind the chat aren't chat
-    "names_url": None,        # where item names and usual prices come from; None: the public price site
+    "names_url": None,        # where item names come from; None: the public price site
     "custom_tab": {"on": True, "name": "Custom", "kinds": ["whisper", "party", "buddy"]},  # a tab of your own
     "twitch_on": False,       # opt in: a Twitch channel's chat in a Twitch tab
     "twitch_channel": "",     # which channel
@@ -1020,7 +1020,7 @@ class ChatPanel:
         return ("mega", "map") if self.opts["watch_map"] else ("mega",)
 
     def load_names(self) -> None:
-        """Item names and usual prices for the watch list, from the price server, every hour."""
+        """Item names for the watch list, from the price server, every hour."""
         while not self.stop.is_set():
             self.watcher.catalog = self.watch.Catalog.load(self.opts["names_url"] or self.watch.NAMES_URL)
             if self.stop.wait(self.watch.NAMES_EVERY):

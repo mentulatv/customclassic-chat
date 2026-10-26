@@ -22,8 +22,8 @@ chat stay readable; megaphones get their own tab instead of flooding everything 
 - **Scrolls like the game's chat**, with its own scrollbar lying over the game's.
 - **Chat history** is kept between restarts: 12 hours by default, or forever.
 - **Watch list:** a chime and a pop-up when a megaphone mentions something you're after
-  ("mushmom", "Work Gloves"). It can also check that someone is selling, that the price is
-  under a limit you set, or that it's well under the usual price.
+  ("mushmom", "Work Gloves"). It can also check that someone is selling, and that the price
+  is within a range you set.
 - **See-through toggle (◐):** the messages turn 90% see-through and clicks go to the game's
   own chat underneath, until you click ◐ again.
 - **Leaves the scenery out:** the game's chat box is see-through, so monster name tags,
@@ -141,21 +141,22 @@ Settings… → **Watch list** → **Add…**. Each entry is a word or an item n
 - **A word** ("mushmom", "mano") fires on any megaphone that mentions it. Close spellings
   count, because text recognition sometimes reads "mushmom" as "mushrnom". Tick "This exact
   word only" to turn that off. Words under 5 letters always need the whole word.
-- **An item** ("Work Gloves") gets name suggestions as you type, along with its usual price
-  and its common shorthands ("wg"). You can then add conditions:
+- **An item** ("Work Gloves") gets name suggestions as you type, along with the shorthands
+  chat uses for it ("wg"). You can then add conditions:
   - someone is **selling** it (S>), not buying
-  - it costs **at most** a price you set (each, like `1.5m` or `400k`)
-  - it's **well under the usual price** (20% or more below the usual sale price)
+  - it costs **between** two prices you set, each (like `400k` and `1.5m`). Leave one side
+    empty for no limit there: just a highest price, or just a lowest (handy to skip "1k"
+    joke offers).
 
 A hit plays a three-note chime, pops up a gold note above the chat for 12 seconds (click it
 to open the Watch tab), and marks the line with a gold ★. The same entry and the same player
 alert at most once every 10 minutes. You can also have it look in map chat, and turn the
 chime or pop-up off.
 
-Item names and usual prices come from the [Maple Price Index](https://mapleprice.mentula.tv),
-which builds them from [NiaMeowDB](https://meowdb.com) and
-[maplestory-classic.com](https://maplestory-classic.com) market data. Maple Chat downloads
-the list once an hour and keeps a copy in `cache/names.json`, so it still works offline.
+Item names (the game's own) and their shorthands come from the
+[Maple Price Index](https://mapleprice.mentula.tv); no prices come with them, the only prices
+are the ones you type. Maple Chat downloads the list once an hour and keeps a copy in
+`cache/names.json`, so it still works offline.
 That download (and, if you opt in, the Twitch chat you chose) is the only thing Maple Chat
 fetches. Your game chat never leaves your PC.
 
