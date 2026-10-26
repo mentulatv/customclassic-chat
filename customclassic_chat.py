@@ -981,6 +981,7 @@ class ChatView:
         self.msgs.canvas.bind("<ButtonRelease-1>", self.on_release)
         for w in (self.msgs, self.strip):
             w.canvas.bind("<Motion>", self.on_motion)
+            w.canvas.bind("<Button-3>", self.menu)
         self.scroll = 0            # messages scrolled up from the newest
         self.in_view = 1           # messages that fit at the last drawing
         self.bar = None            # what the mouse is doing on the scrollbar: ("thumb", grab offset) / ("repeat", step)
@@ -1113,21 +1114,61 @@ class ChatView:
         if e.x < sh + 4:  # the ≡ grip: drag up or down to resize, like the game's chat
             self.grip = (e.y_root, self.opts["extra"], self.panel_now())
             return
-        if e.x >= self.strip.width - sh - 4:  # the rightmost button: ✕ on an extra window, else ◐
-            if self.closable:
-                self.close()
+        for name, x0, x1 in self.buttons():
+            if x0 - 2 <= e.x < x1 + 2:
+                if name == "close":
+                    self.close()
+                    return
+                {"see": self.toggle_see_through, "split": self.app.add_split, "warn": self.dismiss_warning}[name]()
+                self.render()
                 return
-            self.toggle_see_through()
-        elif self.closable and e.x >= self.strip.width - 2 * sh - 8:
-            self.toggle_see_through()
-        elif e.x >= self.strip.width - 2 * sh - 8 and self.warning():
-            self.dismiss_warning()
         for name, x0, x1 in self.tab_spans():
             if x0 <= e.x < x1:
                 self.log.select(name)
                 self.scroll = 0
                 self.tab_chosen(name)
         self.render()
+
+    BUTTON_TEXT = {"close": "✕", "see": "◐", "split": "+"}
+
+    def can_split(self) -> bool:
+        return False
+
+    def buttons(self) -> list[tuple[str, int, int]]:
+        """The buttons at the right end of the tab strip, right to left, as (name, x0, x1): ✕ on an
+        extra window, ◐, + to split the chat (while it isn't), and the ⚠ when there is one."""
+        s = self.strip.height - 4
+        x = self.strip.width - s - 4
+        names = (["close"] if self.closable else []) + ["see"] + (["split"] if self.can_split() else []) + \
+            (["warn"] if self.warning() else [])
+        out = []
+        for name in names:
+            out.append((name, x, x + s))
+            x -= s + 4
+        return out
+
+    def menu(self, e) -> None:
+        """Right click on a chat window: split it, more windows, and the window's own settings."""
+        import tkinter as tk
+        app = self.app
+        m = tk.Menu(self.msgs.root, tearoff=0, bg=PANEL, fg=INK, activebackground=TAB_ON, activeforeground=INK)
+        split = next((w for w in app.windows if w.docked), None)
+        if split is None:
+            m.add_command(label="Split the chat (a pane on top)", command=app.add_split)
+        else:
+            m.add_command(label="Remove the split", command=split.close)
+        m.add_command(label="New chat window", command=app.add_window)
+        if self.closable and not self.docked:  # a split's own menu already offers removing it
+            m.add_command(label="Close this window", command=self.close)
+        m.add_separator()
+        m.add_command(label=("✓ " if self.see_through else "") + "See-through", command=lambda: (
+            self.toggle_see_through(), self.render()))
+        m.add_command(label="Adjust position (Ctrl+Alt+F5)", command=lambda: app.on_hotkey(HK_EDIT))
+        m.add_command(label="Settings…", command=app.open_settings)
+        try:
+            m.tk_popup(e.x_root, e.y_root)
+        finally:
+            m.grab_release()
 
     def on_grip_drag(self, e) -> None:
         if self.drag:
@@ -1225,16 +1266,14 @@ class ChatView:
             if self.log.unread.get(name):
                 r = max(3, h // 6)
                 c.create_oval(x1 - 2 * r - 2, 3, x1 - 2, 3 + 2 * r, fill=GOLD if name == "Watch" else DOT, outline="")
-        s = h - 4
-        x = self.strip.width - s - 4
-        if self.closable:  # ✕ at the right end, ◐ beside it
-            c.create_rectangle(x, 2, x + s, h - 2, fill=TAB, outline="")
-            c.create_text(x + s // 2, h // 2 + 1, text="✕", fill=SOFT, font=self.tab_font)
-            x -= s + 4
-        c.create_rectangle(x, 2, x + s, h - 2, fill=TAB_ON if self.see_through else TAB, outline="")
-        c.create_text(x + s // 2, h // 2 + 1, text="◐", fill=INK if self.see_through else SOFT, font=self.tab_font)
-        if self.warning():  # quiet: an amber mark, explained once a session; a click puts it away
-            c.create_text(x - 4 - s // 2, h // 2 + 1, text="⚠", fill=WARN, font=self.tab_font)
+        for name, x0, x1 in self.buttons():
+            if name == "warn":  # quiet: an amber mark, explained once a session; a click puts it away
+                c.create_text((x0 + x1) // 2, h // 2 + 1, text="⚠", fill=WARN, font=self.tab_font)
+                continue
+            on = name == "see" and self.see_through
+            c.create_rectangle(x0, 2, x1, h - 2, fill=TAB_ON if on else TAB, outline="")
+            c.create_text((x0 + x1) // 2, h // 2 + 1, text=self.BUTTON_TEXT[name], fill=INK if on else SOFT,
+                          font=self.tab_font)
         if self.msgs.edit:
             self.draw_adjust(c, self.strip.width, h, bottom=False)
 
@@ -1680,6 +1719,9 @@ class ChatPanel(ChatView):
     def add_split(self) -> None:
         """Split the chat: a pane with its own tab row on top of the panel, as wide as it and moving
         with it (Mega to start with, so megaphones sit above the chat). Its ≡ grip sets its height."""
+        if not self.can_split():
+            self.events.put(("status", "The chat is split already: its pane's ✕ removes the split."))
+            return
         conf = {"dock": "above", "tab": "Mega", "see_through": False, "height": round(self.line * 5) + 20}
         self.opts["windows"].append(conf)
         w = ExtraChat(self, conf)
@@ -1693,6 +1735,10 @@ class ChatPanel(ChatView):
         for w in self.windows:  # splits move with it
             if w.docked:
                 w.follow()
+
+    def can_split(self) -> bool:
+        """One split at a time: a pane on top of the chat."""
+        return not any(w.docked for w in self.windows)
 
     def stack_now(self) -> dict:
         """The panel with its splits on top: where it all sits on screen."""

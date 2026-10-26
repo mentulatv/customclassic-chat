@@ -82,6 +82,7 @@ python.exe to PATH"), download this repository, double-click **`setup.bat`** onc
 | **≡** (left end) | Drag up or down to make the panel taller or shorter, like the game's chat. |
 | Tabs | Click to switch. A red dot means unread messages; a gold dot on Watch means your watch list caught something. |
 | **◐** (right end) | See-through: messages 90% see-through and click-through until clicked again. |
+| **+** (next to ◐) | Split the chat: a second pane on top with its own tabs (shown while it isn't split). |
 | **⚠** (amber) | Only when the game's chat is minimised or shows one or two lines: megaphones arriving together may scroll away unread. Make the game's chat taller, or click ⚠ to hide it. |
 
 **Scrolling:** the arrows (hold to keep going), the track, dragging the thumb, or the mouse
@@ -91,7 +92,11 @@ wheel. New messages don't pull you down while you're reading back.
 position, Unlocked (place it anywhere), Reset position, Split the chat, New chat window,
 See-through, Settings…, Quit.
 
-**Split the chat:** tray menu or Settings → Tabs → **Split the chat**. A second pane appears on
+**Right-click any chat window** for Split the chat, New chat window, Close this window,
+See-through, Adjust position and Settings….
+
+**Split the chat:** click **+** at the right end of the tab row (or right-click, the tray menu,
+or Settings → Tabs). A second pane appears on
 top of the chat, as wide as it and moving with it, with its own row of tabs: Mega to start with,
 so megaphones sit above and your chat below. Drag the **divider bar** between the two to give one
 more room and the other less; drag the split's ≡ to make the whole thing taller. Click its ✕ to
