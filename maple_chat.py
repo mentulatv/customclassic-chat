@@ -254,6 +254,13 @@ class Dedupe:
         self.minutes, self.compare_last = minutes, compare_last
         self.recent: deque[tuple[float, str]] = deque()
 
+    def seed(self, messages, now: float) -> None:
+        """Lines already read before a restart (kept in the history as they were read): the
+        game's chat still shows them, and they aren't new again."""
+        for m in messages:
+            if m.get("raw") and now - m.get("at", 0) < self.minutes * 60:
+                self.recent.append((m["at"], re.sub(r"[^a-z0-9]", "", m["raw"].lower())))
+
     def is_new(self, text: str, now: float) -> bool:
         from rapidfuzz import fuzz
         key = re.sub(r"[^a-z0-9]", "", text.lower())
@@ -317,7 +324,7 @@ def messages_from(lines, dedupe: Dedupe, now: float, palette: tuple[dict, dict] 
             continue
         fg, bg = style_for(ln, kind, *palette) if palette else (None, None)
         msg = {"kind": kind, "time": time.strftime("%H:%M", time.localtime(now)), "name": p["name"],
-               "body": p["body"], "at": now, "to": None, "fg": fg, "bg": bg}
+               "body": p["body"], "at": now, "to": None, "fg": fg, "bg": bg, "raw": ln.text}
         if kind == "whisper" or p["sep"] in ("<<", ">>", "«", "»"):
             msg["kind"] = "whisper"
             msg["to"] = p["sep"] in ("<<", "«")  # "Name<< hi" is one you sent, "Name[Windia-15]>> hi" one you got
@@ -812,6 +819,7 @@ def read_loop(app) -> None:
     import reader as core
     cfg = core.Config.load()
     reader, dedupe, palette = core.Reader(cfg), Dedupe(), (cfg.colors, cfg.backgrounds)
+    dedupe.seed(list(app.log.messages), time.time())  # what the game's chat still shows from before a restart
     capture, hwnd, last_error = None, None, ""
     last_check, tops, watch = time.time(), deque(maxlen=6), CoverWatch()
     while not app.stop.is_set():

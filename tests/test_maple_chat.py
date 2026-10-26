@@ -339,3 +339,11 @@ def test_received_whispers_carry_the_senders_world_and_channel():
                             line("[18:50] Nimbi<< like 14", "whisper")], mc.Dedupe(), 0.0)
     assert [(m["kind"], m["to"], m.get("ch")) for m in got] == [("whisper", False, 15), ("whisper", True, None)]
     assert mc.line_text(got[0], "off") == "From Nimbi (ch 15) : what level are ya?"
+
+
+def test_lines_read_before_a_restart_are_not_new_again():
+    first = mc.messages_from([line("[18:50] Nimbi<< like 14", "whisper")], mc.Dedupe(), 1000.0)
+    assert first[0]["raw"] == "[18:50] Nimbi<< like 14"
+    d = mc.Dedupe()  # restarted: seeded from the kept history
+    d.seed(first, 1100.0)
+    assert mc.messages_from([line("[18:50] Nimbi<< like 14", "whisper")], d, 1100.0) == []
