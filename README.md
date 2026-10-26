@@ -60,15 +60,21 @@ Want to look around first? `start.bat --demo` shows made-up messages without rea
 **Scrolling:** the arrows (hold to keep going), the track, dragging the thumb, or the mouse
 wheel. New messages don't pull you down while you're reading back.
 
-**Tray icon:** left click shows or hides the panel. Right click: Show / hide, Fit to the
-game's chat, Adjust position, See-through, Settings…, Quit.
+**Tray icon:** left click shows or hides the panel. Right click: Show / hide, Adjust
+position, Unlocked (place it anywhere), Reset position, See-through, Settings…, Quit.
+
+**Somewhere else entirely:** tick **Unlocked** (tray menu or Settings → Position) and drag the
+panel anywhere, even off the game window or onto another monitor; drag its corner to resize,
+then press Ctrl+Alt+F5 to keep it there. It still reads the game's own chat. If it ever ends up
+out of reach, **Reset position** (tray menu, Settings, or Ctrl+Alt+F3) puts it back on the
+game's chat box, and a panel left on a monitor that's gone comes back to the middle by itself.
 
 **Hotkeys**
 
 | Keys | Action |
 |---|---|
 | Ctrl+Alt+F5 | Adjust: drag to move, drag the bottom-right corner to resize, press again to save |
-| Ctrl+Alt+F3 | Fit to the game's chat box again |
+| Ctrl+Alt+F3 | Reset position: back on the game's chat box, fitted again |
 | Ctrl+Alt+F6 | Hide / show |
 | Ctrl+Alt+F7 | Quit |
 
@@ -77,6 +83,7 @@ game's chat, Adjust position, See-through, Settings…, Quit.
 Right-click the tray icon → **Settings…**. Changes apply right away and are remembered.
 
 - Text size (or match the game's), how see-through ◐ makes it, the panel's opacity
+- Position: on the game's chat, or **unlocked** to go anywhere, and **Reset position**
 - Time stamps: with seconds, without, or off. They come from Maple Chat's own clock.
 - How many hours of history to keep, or forever
 - Colours of the background and of each chat type, and **Reset to default colours**
@@ -146,8 +153,8 @@ Chat colours were measured on the Windia world. If a chat type shows in the wron
 
 - **Nothing shows up:** the game's chat box needs to show some lines. With the game in front,
   press Ctrl+Alt+F3.
-- **It sits slightly wrong:** tray icon → Fit to the game's chat, or adjust it by hand with
-  Ctrl+Alt+F5.
+- **It sits slightly wrong, or you can't find it:** tray icon → Reset position (or
+  Ctrl+Alt+F3), or adjust it by hand with Ctrl+Alt+F5.
 - **A yellow border around the game** (Windows 10): that's Windows showing a window is being
   captured. Windows 11 hides it.
 - **Odd words in the chat:** see "Your character names" in Settings. Send a screenshot in an

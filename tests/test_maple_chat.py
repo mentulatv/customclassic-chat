@@ -297,3 +297,10 @@ def test_a_custom_tab_shows_the_chat_types_picked():
     assert log.tab == "All" and "Friends" not in log.unread and log.unread["Watch"]
     assert mc.tabs_for({"on": True, "name": "mega", "kinds": []})[5][0] == "Custom"  # can't take a fixed tab's name
     assert "other" in mc.tabs_for({"on": True, "name": "Local", "kinds": ["map"]})[5][1]
+
+
+def test_an_unlocked_panel_lost_off_screen_comes_back():
+    game = {"left": 0, "top": 0, "width": 1920, "height": 1080}
+    back = mc.rescued({"left": 5000, "top": -900, "width": 600, "height": 200}, game)
+    assert back == {"left": 660, "top": 440, "width": 600, "height": 200}
+    assert mc.rescued({"left": 0, "top": 0, "width": 4000, "height": 3000}, game)["width"] == 1920  # never bigger

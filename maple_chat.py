@@ -17,7 +17,7 @@ through, so the game's own chat shows and can be clicked; clicking it again make
 
     start.bat                   (or: pythonw maple_chat.py)
     Ctrl+Alt+F5   adjust: drag to move, drag the bottom-right corner to resize; press again to save
-    Ctrl+Alt+F3   fit to the game's chat box again (after resizing the chat in the game)
+    Ctrl+Alt+F3   reset position: back on the game's chat box, fitted again
     Ctrl+Alt+F6   hide / show
     Ctrl+Alt+F7   quit
 
@@ -64,6 +64,8 @@ DEFAULTS = {
     "tab": "All",
     "box": None,              # the chat lines relative to the game window: dx, dy (from its bottom), w, h, line, cw, ch
     "extra": 0,               # pixels the panel reaches above the game's chat (dragged with the ≡ grip)
+    "unlocked": False,        # placed anywhere you like instead of on the game's chat (it still reads the game's chat)
+    "free": None,             # where it sits then, on screen: left, top, width, height
 }
 MEGAPHONES = {"megaphone", "super_megaphone", "item_megaphone"}
 TABS = [("All", {"map", "whisper", "party", "buddy", "other", "system", "status"}), ("Whisper", {"whisper", "status"}),
@@ -492,6 +494,24 @@ def resized(current: dict, found: dict, line: float, history: deque) -> dict | N
     return {**current, "top": target, "height": bottom - target}
 
 
+def on_screen(r: dict) -> bool:
+    """Whether a rect on screen is on one of the monitors (not off the edge, or on one unplugged since)."""
+    import ctypes
+    import ctypes.wintypes as wt
+    rect = wt.RECT(int(r["left"]), int(r["top"]), int(r["left"] + r["width"]), int(r["top"] + r["height"]))
+    u32 = ctypes.windll.user32
+    u32.MonitorFromRect.restype = ctypes.c_void_p
+    return bool(u32.MonitorFromRect(ctypes.byref(rect), 0))  # MONITOR_DEFAULTTONULL
+
+
+def rescued(free: dict, area: dict) -> dict:
+    """An unlocked panel whose tab strip (where it's dragged from) is off every monitor comes
+    back to the middle of `area` (the game window or the main screen), no bigger than it."""
+    w, h = min(free["width"], area["width"]), min(free["height"], area["height"])
+    return {"left": area["left"] + (area["width"] - w) // 2, "top": area["top"] + (area["height"] - h) // 2,
+            "width": w, "height": h}
+
+
 def inside(x: int, y: int, r: dict | None) -> bool:
     return bool(r) and r["left"] <= x < r["left"] + r["width"] and r["top"] <= y < r["top"] + r["height"]
 
@@ -622,8 +642,9 @@ def start_tray(app):
     send = lambda *e: (lambda icon, item: app.events.put(e))  # noqa: E731
     menu = pystray.Menu(
         pystray.MenuItem("Show / hide", send("hotkey", HK_HIDE), default=True),
-        pystray.MenuItem("Fit to the game's chat", send("hotkey", HK_FIT)),
         pystray.MenuItem("Adjust position", send("hotkey", HK_EDIT)),
+        pystray.MenuItem("Unlocked (place it anywhere)", send("unlock", None), checked=lambda item: app.opts["unlocked"]),
+        pystray.MenuItem("Reset position", send("hotkey", HK_FIT)),
         pystray.MenuItem("See-through", send("see_through", None), checked=lambda item: app.opts["see_through"]),
         pystray.MenuItem("Settings…", send("settings", None)),
         pystray.Menu.SEPARATOR,
@@ -886,6 +907,7 @@ class ChatPanel:
         self.fit_asked = 0.0
         self.explained = False     # the "chat too small" note, once a session
         self.settings = None
+        self.settings_vars: dict = {}  # Settings window controls that change from elsewhere too
         self.set_fonts()
         CACHE_DIR.mkdir(exist_ok=True)
         self.chime = CACHE_DIR / f"whisper_{int(opts['volume'] * 100)}.wav"
@@ -1014,8 +1036,22 @@ class ChatPanel:
         return {"left": self.root.winfo_x(), "top": self.strip.root.winfo_y(), "width": self.msgs.width,
                 "height": self.strip.height + self.msgs.height}
 
+    def free_rect(self) -> dict:
+        """Where an unlocked panel sits: where it was put, or back in view if that's off every monitor."""
+        free = self.opts["free"] or self.panel_now()
+        if not on_screen({**free, "height": strip_height(self.line)}):
+            area = self.game["client"] if self.game else {"left": 0, "top": 0, "width": self.root.winfo_screenwidth(),
+                                                          "height": self.root.winfo_screenheight()}
+            free = self.opts["free"] = rescued(free, area)
+            save_settings(self.opts)
+        return free
+
     def follow(self) -> None:
-        """Keep the panel on the game's chat box, and show it only while the game is in front."""
+        """Keep the panel on the game's chat box (or where it was put, when unlocked), and show it
+        only while the game is in front."""
+        unlocked = self.opts["unlocked"]
+        if unlocked and not self.msgs.edit and not self.grip:
+            self.place(self.free_rect())
         if not self.demo:
             game = game_geometry()
             self.game = game
@@ -1027,14 +1063,17 @@ class ChatPanel:
                 self.read_rect = {"left": rect["left"] - game["client"]["left"],
                                   "top": rect["top"] - game["client"]["top"], "width": rect["width"],
                                   "height": rect["height"]}
-                self.place(panel_rect(rect, self.opts["extra"], self.bar_px))
+                if not unlocked:
+                    self.place(panel_rect(rect, self.opts["extra"], self.bar_px))
                 reason = self.warning()
                 if reason and not self.explained:
                     self.explained = True
                     self.explain(reason)
             ours = {self.msgs.hwnd, self.strip.hwnd}
             front = game and (foreground_root() in ({game["hwnd"]} | ours))
-            visible = bool((front or self.always_show) and rect) and not self.user_hidden and not self.covered
+            # unlocked, it isn't over the game's chat: nothing there to step aside for
+            visible = (bool((front or self.always_show) and (rect or unlocked)) and not self.user_hidden
+                       and not (self.covered and not unlocked))
             self.msgs.show(visible or self.msgs.edit)
             self.strip.show(visible or self.msgs.edit)
         self.root.after(300, self.follow)
@@ -1085,6 +1124,9 @@ class ChatPanel:
                 elif kind == "see_through":
                     self.toggle_see_through()
                     changed = True
+                elif kind == "unlock":
+                    self.set_unlocked(not self.opts["unlocked"])
+                    changed = True
                 elif kind == "settings":
                     self.open_settings()
                 elif kind == "covered":
@@ -1110,7 +1152,10 @@ class ChatPanel:
             locked = self.msgs.toggle_edit()
             self.strip.edit = self.msgs.edit
             self.apply_see_through()  # solid while adjusting
-            if locked and self.game:
+            if locked and self.opts["unlocked"]:
+                self.opts["free"] = self.panel_now()
+                save_settings(self.opts)
+            elif locked and self.game:
                 c, p = self.game["client"], self.panel_now()
                 extra = max(0, min(self.opts["extra"], p["height"] - 2 * round(self.line)))
                 box = {"left": p["left"] - c["left"], "top": p["top"] - c["top"] + extra,
@@ -1118,7 +1163,7 @@ class ChatPanel:
                 self.opts["box"], self.opts["extra"] = to_relative(box, self.line, c), extra
                 save_settings(self.opts)
         elif hk == HK_FIT:
-            self.want_fit = True
+            self.reset_position()
         elif hk == HK_HIDE:
             self.user_hidden = not self.user_hidden
         elif hk == HK_QUIT:
@@ -1126,6 +1171,41 @@ class ChatPanel:
             if self.tray:
                 self.tray.stop()
             self.root.destroy()
+
+    def set_unlocked(self, on: bool) -> None:
+        """Unlocked: the panel can go anywhere, even off the game window, and it starts in
+        adjust mode to be dragged there. It still reads the game's own chat. Locked again, it
+        goes back onto the game's chat."""
+        if on == bool(self.opts["unlocked"]):
+            return
+        self.opts["unlocked"] = on
+        if on:
+            self.opts["free"] = self.opts["free"] or self.panel_now()
+            if not self.msgs.edit:
+                self.on_hotkey(HK_EDIT)
+            self.events.put(("status", "Unlocked: drag the panel anywhere and its corner to resize, then press "
+                                       "Ctrl+Alt+F5 to keep it there. Reset position puts it back on the game's chat."))
+        elif self.msgs.edit:
+            self.msgs.toggle_edit()  # leave adjusting without saving it as the game's chat box
+            self.strip.edit = False
+            self.apply_see_through()
+        self._where = None
+        save_settings(self.opts)
+        if self.settings_vars:
+            self.settings_vars["unlocked"].set(on)
+
+    def reset_position(self) -> None:
+        """Back on the game's chat box, fitted again: for a panel put somewhere it can't be reached,
+        or moved off the chat by accident."""
+        self.set_unlocked(False)
+        if self.msgs.edit:
+            self.msgs.toggle_edit()
+            self.strip.edit = False
+            self.apply_see_through()
+        self.opts["extra"], self.opts["free"], self.user_hidden = 0, None, False
+        self.want_fit = True
+        self._where = None
+        save_settings(self.opts)
 
     def tab_spans(self) -> list[tuple[str, int, int]]:
         x, out, pad = strip_height(self.line) + 6, [], 10  # after the ≡ grip
@@ -1137,7 +1217,7 @@ class ChatPanel:
 
     def on_strip_click(self, e) -> None:
         if e.x < strip_height(self.line) + 4:  # the ≡ grip: drag up or down to resize, like the game's chat
-            self.grip = (e.y_root, self.opts["extra"])
+            self.grip = (e.y_root, self.opts["extra"], self.panel_now())
             return
         sh = strip_height(self.line)
         if e.x >= self.strip.width - sh - 4:
@@ -1152,8 +1232,13 @@ class ChatPanel:
         self.render()
 
     def on_grip_drag(self, e) -> None:
-        if self.grip and self.read_rect and self.game:
-            y0, extra0 = self.grip
+        if self.grip and self.opts["unlocked"]:
+            y0, _, p = self.grip
+            bottom = p["top"] + p["height"]
+            h = max(2 * round(self.line) + strip_height(self.line), p["height"] + (y0 - e.y_root))
+            self.place({**p, "top": bottom - h, "height": h})
+        elif self.grip and self.read_rect and self.game:
+            y0, extra0, _ = self.grip
             c = self.game["client"]
             top_room = c["top"] + self.read_rect["top"]  # up to the top of the screen
             self.opts["extra"] = max(0, min(top_room, extra0 + (y0 - e.y_root)))
@@ -1163,6 +1248,8 @@ class ChatPanel:
     def on_grip_release(self, e) -> None:
         if self.grip:
             self.grip = None
+            if self.opts["unlocked"]:
+                self.opts["free"] = self.panel_now()
             save_settings(self.opts)
 
     # scrolling, like the game's chat ---------------------------------------
@@ -1339,6 +1426,17 @@ class ChatPanel:
             self.apply_see_through()
         tk.Label(win, text="Panel opacity (%)", anchor="w", **look).pack(fill="x", pady=(12, 0))
         tk.Scale(win, from_=30, to=100, variable=opacity, command=set_opacity, **slider).pack(fill="x")
+
+        # where it sits: on the game's chat, or anywhere (it reads the game's chat either way)
+        tk.Label(win, text="Position", anchor="w", **look).pack(fill="x", pady=(12, 0))
+        row = tk.Frame(win, bg=PANEL)
+        row.pack(fill="x")
+        unlocked = self.settings_vars["unlocked"] = tk.BooleanVar(value=self.opts["unlocked"])
+        tk.Checkbutton(row, text="Unlocked: place it anywhere, even off the game", variable=unlocked,
+                       command=lambda: self.set_unlocked(unlocked.get()), selectcolor=TAB, activebackground=PANEL,
+                       activeforeground=INK, **look).pack(side="left")
+        tk.Button(row, text="Reset position", font=(FONT, 9),
+                  command=lambda: (self.reset_position(), unlocked.set(False))).pack(side="right")
 
         # time stamps: Maple Chat's own clock, so they're there even when the game shows none
         tk.Label(win, text="Time stamps", anchor="w", **look).pack(fill="x", pady=(12, 0))
