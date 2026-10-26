@@ -94,6 +94,7 @@ POPUP = re.compile(r"(?i)\b(?:party|guild|alliance|family)\s+invit\w*\s+from\b|\
 PANEL, STRIP, TAB, TAB_ON, INK, SOFT, DOT = "#111827", "#0b1120", "#1c2740", "#2f5597", "#eef3fb", "#8f9db5", "#ff4b4b"
 WARN = "#ffc24b"
 GOLD = "#ffd24a"  # the watch list's star and dot
+ADJUST, ADJUST_EDGE = "#2f6fe0", "#9fc2ff"  # adjust mode: the banner, the outline and corner handles
 SB_TRACK, SB_BUTTON, SB_ARROW, SB_THUMB, SB_EDGE = "#e3e8ef", "#a9c8ee", "#1f4f8f", "#8ea3c2", "#5b7fb4"  # as the game's
 FONT = "Verdana"
 HOTKEYS = {1: 0x74, 2: 0x75, 3: 0x76, 4: 0x72}  # Ctrl+Alt+F5 adjust, F6 hide, F7 quit, F3 fit again
@@ -978,6 +979,8 @@ class ChatView:
         self.msgs.canvas.bind("<ButtonPress-1>", self.on_press)
         self.msgs.canvas.bind("<B1-Motion>", self.on_drag)
         self.msgs.canvas.bind("<ButtonRelease-1>", self.on_release)
+        for w in (self.msgs, self.strip):
+            w.canvas.bind("<Motion>", self.on_motion)
         self.scroll = 0            # messages scrolled up from the newest
         self.in_view = 1           # messages that fit at the last drawing
         self.bar = None            # what the mouse is doing on the scrollbar: ("thumb", grab offset) / ("repeat", step)
@@ -1022,6 +1025,57 @@ class ChatView:
         return {"left": self.msgs.root.winfo_x(), "top": self.strip.root.winfo_y(), "width": self.msgs.width,
                 "height": self.strip.height + self.msgs.height}
 
+    def placed(self) -> dict:
+        """Where the window was last put (Windows reports a move a moment later)."""
+        if self._where:
+            left, top, width, height, _ = self._where
+            return {"left": left, "top": top, "width": width, "height": height}
+        return self.panel_now()
+
+    # adjust mode: drag to move, any edge or corner to resize ------------------
+
+    EDGE = 12  # how close to an edge a press resizes rather than moves
+
+    def edit_zone(self, x: int, y: int) -> str:
+        """Which part of the window a press at screen (x, y) grabs: "n", "se", "w" ... or "move"."""
+        r = self.placed()
+        e = self.EDGE
+        v = "n" if y - r["top"] < e else ("s" if r["top"] + r["height"] - y < e else "")
+        h = "w" if x - r["left"] < e else ("e" if r["left"] + r["width"] - x < e else "")
+        return (v + h) or "move"
+
+    CURSORS = {"move": "fleur", "n": "sb_v_double_arrow", "s": "sb_v_double_arrow", "e": "sb_h_double_arrow",
+               "w": "sb_h_double_arrow", "nw": "size_nw_se", "se": "size_nw_se", "ne": "size_ne_sw", "sw": "size_ne_sw"}
+
+    def on_motion(self, e) -> None:
+        """While adjusting, the pointer shows what a press would do there."""
+        cursor = self.CURSORS[self.edit_zone(e.x_root, e.y_root)] if self.msgs.edit else ""
+        for w in (self.msgs, self.strip):
+            w.canvas.configure(cursor=cursor)
+
+    def start_edit_drag(self, e) -> None:
+        self.drag = (self.edit_zone(e.x_root, e.y_root), e.x_root, e.y_root, self.placed())
+
+    def edit_drag(self, e) -> None:
+        """Move, or resize from the edge or corner grabbed; the opposite side stays put."""
+        zone, x0, y0, r = self.drag
+        dx, dy = e.x_root - x0, e.y_root - y0
+        left, top, w, h = r["left"], r["top"], r["width"], r["height"]
+        min_w, min_h = 200, 2 * round(self.line) + strip_height(self.line)
+        if zone == "move":
+            left, top = left + dx, top + dy
+        if "e" in zone:
+            w = max(min_w, w + dx)
+        if "w" in zone:
+            w2 = max(min_w, w - dx)
+            left, w = left + w - w2, w2
+        if "s" in zone:
+            h = max(min_h, h + dy)
+        if "n" in zone:
+            h2 = max(min_h, h - dy)
+            top, h = top + h - h2, h2
+        self.place({"left": left, "top": top, "width": w, "height": h})
+
     def keep_on_screen(self, free: dict) -> dict:
         """A place put somewhere that's off every monitor (one unplugged since) comes back to the
         middle of the game window or the main screen."""
@@ -1052,6 +1106,9 @@ class ChatView:
         return out
 
     def on_strip_click(self, e) -> None:
+        if self.msgs.edit:  # adjusting: the tab row moves the window, its top edge and corners resize it
+            self.start_edit_drag(e)
+            return
         sh = strip_height(self.line)
         if e.x < sh + 4:  # the ≡ grip: drag up or down to resize, like the game's chat
             self.grip = (e.y_root, self.opts["extra"], self.panel_now())
@@ -1073,6 +1130,9 @@ class ChatView:
         self.render()
 
     def on_grip_drag(self, e) -> None:
+        if self.drag:
+            self.edit_drag(e)
+            return
         if self.grip and self.is_free:  # grows upward from its bottom, like the game's chat
             y0, _, p = self.grip
             bottom = p["top"] + p["height"]
@@ -1082,6 +1142,7 @@ class ChatView:
             self.grip_on_chat(e)
 
     def on_grip_release(self, e) -> None:
+        self.drag = None
         if self.grip:
             self.grip = None
             if self.is_free:
@@ -1117,10 +1178,7 @@ class ChatView:
 
     def on_press(self, e) -> None:
         if self.msgs.edit:
-            near_corner = e.x > self.msgs.width - 16 and e.y > self.msgs.height - 16
-            p = self.panel_now()
-            self.drag = ("size" if near_corner else "move", e.x_root, e.y_root, p["left"], p["top"], p["width"],
-                         p["height"])
+            self.start_edit_drag(e)
             return
         if e.x >= self.msgs.width - self.bar_px:
             part = self.bar_hit(e.y)
@@ -1143,14 +1201,8 @@ class ChatView:
             self.scroll_to(scroll_at(e.y - self.bar[1], total, self.in_view, self.msgs.height, b, size))
             self.render()
             return
-        if not (self.msgs.edit and self.drag):
-            return
-        mode, x0, y0, left, top, w, h = self.drag
-        dx, dy = e.x_root - x0, e.y_root - y0
-        if mode == "move":
-            self.place({"left": left + dx, "top": top + dy, "width": w, "height": h})
-        else:
-            self.place({"left": left, "top": top, "width": max(200, w + dx), "height": max(2 * round(self.line), h + dy)})
+        if self.msgs.edit and self.drag:
+            self.edit_drag(e)
 
     # drawing ----------------------------------------------------------------
 
@@ -1183,6 +1235,8 @@ class ChatView:
         c.create_text(x + s // 2, h // 2 + 1, text="◐", fill=INK if self.see_through else SOFT, font=self.tab_font)
         if self.warning():  # quiet: an amber mark, explained once a session; a click puts it away
             c.create_text(x - 4 - s // 2, h // 2 + 1, text="⚠", fill=WARN, font=self.tab_font)
+        if self.msgs.edit:
+            self.draw_adjust(c, self.strip.width, h, bottom=False)
 
     def render_messages(self) -> None:
         c, w, h = self.msgs.canvas, self.msgs.width, self.msgs.height
@@ -1227,10 +1281,26 @@ class ChatView:
         if total > self.in_view:
             c.create_rectangle(x0 + 2, top, w - 3, top + size - 1, fill=SB_THUMB, outline=SB_EDGE)
         if self.msgs.edit:
-            c.create_rectangle(1, 1, w - 2, h - 2, outline="#9db1d3", dash=(4, 3))
-            c.create_rectangle(w - 14, h - 14, w - 2, h - 2, fill="#9db1d3", outline="")
-            c.create_text(w // 2, h // 2, text="Drag to move, corner to resize. Ctrl+Alt+F5 saves.", fill=INK,
-                          font=self.tab_font)
+            self.draw_adjust(c, w, h, bottom=True)
+            # the banner: what to do, and the key that finishes it, big enough to read at a glance
+            text = c.create_text(w // 2, h // 2, justify="center", fill="#ffffff", font=self.hint_font,
+                                 width=max(120, w - 60),
+                                 text="Drag to move  ·  drag an edge or corner to resize\nPress Ctrl+Alt+F5 to save")
+            x0, y0, x1, y1 = c.bbox(text)
+            box = c.create_rectangle(x0 - 14, y0 - 10, x1 + 14, y1 + 10, fill=ADJUST, outline="#ffffff", width=2)
+            c.tag_raise(text, box)
+
+    def draw_adjust(self, c, w: int, h: int, bottom: bool) -> None:
+        """Adjust mode's frame: a dashed outline and a handle in each corner of the window (the tab
+        strip draws the top ones, the messages the bottom ones)."""
+        s = max(10, self.EDGE)
+        c.create_line(1, 0 if bottom else 1, 1, h, fill=ADJUST_EDGE, width=2, dash=(6, 3))
+        c.create_line(w - 2, 0 if bottom else 1, w - 2, h, fill=ADJUST_EDGE, width=2, dash=(6, 3))
+        y = h - 2 if bottom else 1
+        c.create_line(0, y, w, y, fill=ADJUST_EDGE, width=2, dash=(6, 3))
+        y0 = h - s if bottom else 0
+        for x0 in (0, w - s):
+            c.create_rectangle(x0, y0, x0 + s - 1, y0 + s - 1, fill="#ffffff", outline=ADJUST, width=2)
 
 
 class ExtraChat(ChatView):
@@ -1239,17 +1309,67 @@ class ExtraChat(ChatView):
 
     closable = True
 
+    DIV = 7  # a split's divider bar, between it and the chat below
+
     def __init__(self, app, conf: dict):
         self.app, self.conf = app, conf  # conf: its entry in opts["windows"], saved as it changes
         self.log = app.log.view_of(conf.get("tab") or "All")
         self.build("CustomClassic Chat window", master=app.root)
+        self.div = self.div_drag = None
+        if self.docked:  # a bar of its own under the split: drag it to move the line between the two
+            self.div = app.overlay.Overlay("CustomClassic Chat divider", 40, 40, 400, self.DIV, master=self.msgs.root,
+                                           click_through=False)
+            c = self.div.canvas
+            c.configure(bg=TAB, cursor="sb_v_double_arrow")
+            c.bind("<ButtonPress-1>", self.on_div_press)
+            c.bind("<B1-Motion>", self.on_div_drag)
+            c.bind("<ButtonRelease-1>", self.on_div_release)
+            c.bind("<Enter>", lambda e: self.draw_div(True))
+            c.bind("<Leave>", lambda e: self.draw_div(False))
         self.apply_see_through()
+
+    # a split's divider --------------------------------------------------------
+
+    def draw_div(self, hot: bool = False) -> None:
+        c, w, h = self.div.canvas, self.div.width, self.div.height
+        c.delete("all")
+        c.create_rectangle(0, 0, w, h, fill=TAB_ON if hot else TAB, outline="")
+        for i in (-1, 0, 1):  # a grip in the middle, like the ≡
+            x = w // 2 + i * 10
+            c.create_line(x - 3, h // 2, x + 3, h // 2, fill=INK if hot else SOFT, width=2)
+
+    def on_div_press(self, e) -> None:
+        self.div_drag = (e.y_root, int(self.conf.get("height") or 120), self.app.placed(), self.app.opts["extra"])
+
+    def on_div_drag(self, e) -> None:
+        """Move the line between the split and the chat: one gets taller as the other gets shorter,
+        the top of the split and the bottom of the chat stay put. The chat never gets shorter than
+        the game's chat it covers (when it sits on it)."""
+        if not self.div_drag:
+            return
+        y0, h0, m0, extra0 = self.div_drag
+        app, line, sh = self.app, self.line, strip_height(self.line)
+        d = max(sh + 2 * round(line) + self.DIV - h0, e.y_root - y0)
+        on_chat = not app.is_free and app.read_rect and app.game
+        d = min(d, extra0 if on_chat else m0["height"] - sh - 2 * round(line))
+        self.conf["height"] = h0 + d
+        if on_chat:
+            app.opts["extra"] = extra0 - d
+        app.place({**m0, "top": m0["top"] + d, "height": m0["height"] - d})
+
+    def on_div_release(self, e) -> None:
+        if self.div_drag:
+            self.div_drag = None
+            if self.app.is_free:
+                self.app.keep(self.app.placed())
+            save_settings(self.opts)
 
     # what the main panel knows, shared
     opts = property(lambda self: self.app.opts)
     line = property(lambda self: self.app.line)
     font = property(lambda self: self.app.font)
     tab_font = property(lambda self: self.app.tab_font)
+    hint_font = property(lambda self: self.app.hint_font)
     bar_px = property(lambda self: bar_width(self.app.line))  # its own scrollbar: not over the game's
     is_free = True
 
@@ -1281,6 +1401,29 @@ class ExtraChat(ChatView):
             self.conf["free"] = rect
         save_settings(self.opts)
 
+    # a split: its divider under it, as part of it --------------------------------
+
+    def place(self, r: dict) -> None:
+        if not self.div:
+            return ChatView.place(self, r)
+        d = self.DIV
+        ChatView.place(self, {**r, "height": r["height"] - d})
+        self.div.place(r["left"], r["top"] + r["height"] - d, r["width"], d)
+        self.draw_div()
+
+    def panel_now(self) -> dict:
+        p = ChatView.panel_now(self)
+        return {**p, "height": p["height"] + self.DIV} if self.div else p
+
+    @property
+    def hwnds(self) -> set:
+        return ChatView.hwnds.fget(self) | ({self.div.hwnd} if self.div else set())
+
+    def show(self, visible: bool) -> None:
+        ChatView.show(self, visible)
+        if self.div:
+            self.div.show(visible)
+
     def keep_adjusted(self) -> None:
         self.keep(self.panel_now())
 
@@ -1304,6 +1447,8 @@ class ExtraChat(ChatView):
         self.app.close_window(self)
 
     def destroy(self) -> None:
+        if self.div:
+            self.div.root.destroy()
         self.strip.root.destroy()
         self.msgs.root.destroy()
 
@@ -1440,6 +1585,7 @@ class ChatPanel(ChatView):
         import tkinter.font as tkfont
         self.font = tkfont.Font(family=FONT, size=-(self.opts["font_px"] or self.auto_px()))
         self.tab_font = tkfont.Font(family=FONT, size=-max(10, round(self.line * 0.5)))
+        self.hint_font = tkfont.Font(family=FONT, size=-max(13, round(self.line * 0.85)), weight="bold")
 
     def warning(self) -> str | None:
         """Why lines may slip by, if they may: the game's chat is minimised or shows only one
@@ -1541,13 +1687,6 @@ class ChatPanel(ChatView):
         w.follow()
         save_settings(self.opts)
         self.settings_changed()
-
-    def placed(self) -> dict:
-        """Where the panel was last put (Windows reports a move a moment later)."""
-        if self._where:
-            left, top, width, height, _ = self._where
-            return {"left": left, "top": top, "width": width, "height": height}
-        return self.panel_now()
 
     def place(self, r: dict) -> None:
         ChatView.place(self, r)

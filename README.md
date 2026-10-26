@@ -93,8 +93,9 @@ See-through, Settings…, Quit.
 
 **Split the chat:** tray menu or Settings → Tabs → **Split the chat**. A second pane appears on
 top of the chat, as wide as it and moving with it, with its own row of tabs: Mega to start with,
-so megaphones sit above and your chat below. Drag its ≡ to make it taller, click its ✕ to close
-it. A tab open in one pane gets no unread dot in the other.
+so megaphones sit above and your chat below. Drag the **divider bar** between the two to give one
+more room and the other less; drag the split's ≡ to make the whole thing taller. Click its ✕ to
+close it. A tab open in one pane gets no unread dot in the other.
 
 **More chat windows:** tray menu or Settings → Position → **Add a chat window**. Each window
 has its own tab and ◐, and goes anywhere you drag it: next to the game, on another screen. It
@@ -111,7 +112,7 @@ game's chat box, and a panel left on a monitor that's gone comes back to the mid
 
 | Keys | Action |
 |---|---|
-| Ctrl+Alt+F5 | Adjust: drag to move, drag the bottom-right corner to resize, press again to save |
+| Ctrl+Alt+F5 | Adjust: drag to move, drag any edge or corner to resize, press again to save |
 | Ctrl+Alt+F3 | Reset position: back on the game's chat box, fitted again |
 | Ctrl+Alt+F6 | Hide / show |
 | Ctrl+Alt+F7 | Quit |
