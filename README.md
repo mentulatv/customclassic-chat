@@ -5,7 +5,8 @@ chat box and keeps the **megaphones out of your chat**. Map chat, whispers, part
 chat stay readable; megaphones get their own tab instead of flooding everything else.
 
 - **Tabs** like modern MapleStory: All (everything but megaphones), Whisper, Party, Buddy, Mega
-  and Watch. A red dot marks a tab with messages you haven't seen.
+  and Watch, plus **a tab of your own** showing just the chat types you pick. A red dot marks
+  a tab with messages you haven't seen.
 - **Looks like the game:** megaphones on their pink, teal or gold band, green whispers,
   orange buddy chat, white map chat. Text size, colours, opacity and time stamps are adjustable.
 - **Fits the game's chat box by itself** at any resolution or Windows scaling, follows the
@@ -81,6 +82,9 @@ Right-click the tray icon → **Settings…**. Changes apply right away and are 
 - Colours of the background and of each chat type, and **Reset to default colours**
 - Your character names, so their name tags behind the chat are left out
 - Whether the game's system messages show (out of MP, shop closed, play time…)
+- **A tab of your own:** its name, and which of map chat, whispers, party, buddy/guild,
+  megaphones, system messages and watch-list catches it shows (whispers, party and buddy
+  to start with). Untick it to hide the tab.
 - The whisper chime
 - The watch list
 
@@ -154,7 +158,6 @@ each chat line of a saved screenshot lands in. Tests: `python -m pytest`.
 
 ## Roadmap
 
-- A **custom tab** where you pick which chat types it shows
 - **Twitch chat** in its own tab, for streamers
 - **Discord channel** chat in its own tab
 

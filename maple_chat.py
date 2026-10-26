@@ -60,6 +60,7 @@ DEFAULTS = {
     "watch_sound": True, "watch_popup": True,  # a hit chimes and pops up a note by the panel
     "ignore_names": [],       # your character names: their name tags behind the chat aren't chat
     "names_url": None,        # where item names and usual prices come from; None: the public price site
+    "custom_tab": {"on": True, "name": "Custom", "kinds": ["whisper", "party", "buddy"]},  # a tab of your own
     "tab": "All",
     "box": None,              # the chat lines relative to the game window: dx, dy (from its bottom), w, h, line, cw, ch
     "extra": 0,               # pixels the panel reaches above the game's chat (dragged with the ≡ grip)
@@ -67,7 +68,10 @@ DEFAULTS = {
 MEGAPHONES = {"megaphone", "super_megaphone", "item_megaphone"}
 TABS = [("All", {"map", "whisper", "party", "buddy", "other", "system", "status"}), ("Whisper", {"whisper", "status"}),
         ("Party", {"party", "status"}), ("Buddy", {"buddy", "status"}), ("Mega", {"mega", "status"}),
-        ("Watch", set())]  # Watch: the lines your watch list caught, whatever chat they came from
+        ("Watch", {"watch"})]  # Watch: the lines your watch list caught, whatever chat they came from
+# what the custom tab can show, as Settings lists them
+CUSTOM_KINDS = [("map", "Map chat"), ("whisper", "Whispers"), ("party", "Party"), ("buddy", "Buddy / guild"),
+                ("mega", "Megaphones"), ("system", "System messages"), ("watch", "Watch list catches")]
 COLORS = {"map": "#ffffff", "whisper": "#00ff00", "party": "#ff8fc7", "buddy": "#ff9900", "other": "#c8d2e4",
           "mega": "#f2a7cf", "system": "#ffafaf", "status": "#ffc24b"}  # the game's own where measured; notes in amber
 # the game's own pop-ups that appear over the chat box: Maple Chat steps aside while one is up
@@ -337,34 +341,60 @@ def save_message(path: Path, msg: dict) -> None:
         pass
 
 
+def tabs_for(custom: dict | None) -> list[tuple[str, set]]:
+    """The tabs: the fixed ones, and the custom tab (before Watch) when it's on. Map chat brings
+    the lines of no known chat type along, as All does."""
+    if not custom or not custom.get("on"):
+        return TABS
+    taken = {name.lower() for name, _ in TABS}
+    name = (custom.get("name") or "").strip()[:12]
+    name = name if name and name.lower() not in taken else "Custom"
+    kinds = set(custom.get("kinds") or []) | {"status"} | ({"other"} if "map" in (custom.get("kinds") or []) else set())
+    return TABS[:-1] + [(name, kinds)] + TABS[-1:]
+
+
+def shows(kinds: set, msg: dict) -> bool:
+    """Whether a tab of these kinds shows the message: "watch" stands for the watch list's catches."""
+    return msg["kind"] in kinds or bool("watch" in kinds and msg.get("watch"))
+
+
 class ChatLog:
     """Messages in tabs, and which tabs hold messages you haven't seen."""
 
-    def __init__(self, history: int = 400, tab: str = "All"):
+    def __init__(self, history: int = 400, tab: str = "All", tabs: list | None = None):
         self.messages: deque[dict] = deque(maxlen=history)
-        self.tab = tab if tab in dict(TABS) else "All"
-        self.unread = {name: False for name, _ in TABS}
+        self.tabs, self.tab, self.unread = [], "All", {}
+        self.set_tabs(tabs or TABS, tab)
         self.hidden: set[str] = set()  # kinds not shown (kept, so showing them again brings them back)
+
+    def set_tabs(self, tabs: list, tab: str | None = None) -> None:
+        """New tabs (the custom tab changed): unread marks kept where the tab still exists."""
+        self.tabs = tabs
+        self.unread = {name: self.unread.get(name, False) for name, _ in tabs}
+        want = tab or self.tab
+        self.tab = want if want in self.unread else "All"
+
+    def kinds(self, tab: str | None = None) -> set:
+        return dict(self.tabs)[tab or self.tab]
 
     def add(self, msg: dict) -> None:
         self.messages.append(msg)
         if msg["kind"] == "status" or msg["kind"] in self.hidden:  # nothing to miss
             return
-        showing = dict(TABS)[self.tab]
-        for name, kinds in TABS:
-            if msg["kind"] in kinds and msg["kind"] not in showing:
+        showing = self.kinds()
+        for name, kinds in self.tabs:
+            if name == self.tab or not shows(kinds, msg):
+                continue
+            # a dot where it isn't in view; a watch-list catch always marks the tabs collecting them
+            if not shows(showing, msg) or (msg.get("watch") and "watch" in kinds):
                 self.unread[name] = True
-        if msg.get("watch") and self.tab != "Watch":
-            self.unread["Watch"] = True
 
     def select(self, tab: str) -> None:
         self.tab, self.unread[tab] = tab, False
 
     def visible(self) -> list[dict]:
-        if self.tab == "Watch":
-            return [m for m in self.messages if m.get("watch")]
-        kinds = dict(TABS)[self.tab] - self.hidden
-        return [m for m in self.messages if m["kind"] in kinds]
+        kinds = self.kinds() - self.hidden
+        return [m for m in self.messages if shows(kinds, m)]
 
 
 # ------------------------------------------------------------------ where the panel goes
@@ -820,7 +850,7 @@ class ChatPanel:
         self.overlay, self.opts, self.demo = overlay, opts, demo
         self.always_show, self.verbose = always_show, verbose
         self.events: queue.Queue = queue.Queue()
-        self.log = ChatLog(opts["history"], opts["tab"])
+        self.log = ChatLog(opts["history"], opts["tab"], tabs_for(opts["custom_tab"]))
         self.log.hidden = set() if opts["system_messages"] else {"system"}
         if not demo:  # the chat from earlier runs, within the kept hours
             now = time.time()
@@ -1038,7 +1068,7 @@ class ChatPanel:
                     self.log.add(data)
                     if not self.demo:
                         save_message(HISTORY_FILE, data)
-                    if self.scroll and data["kind"] in dict(TABS)[self.log.tab]:
+                    if self.scroll and shows(self.log.kinds(), data):
                         self.scroll_to(self.scroll + 1)  # reading history: keep the same lines in view
                     changed = True
                     if data["kind"] == "whisper" and not data["to"] and self.opts["whisper_sound"]:
@@ -1099,7 +1129,7 @@ class ChatPanel:
 
     def tab_spans(self) -> list[tuple[str, int, int]]:
         x, out, pad = strip_height(self.line) + 6, [], 10  # after the ≡ grip
-        for name, _ in TABS:
+        for name, _ in self.log.tabs:
             w = self.tab_font.measure(name) + 2 * pad
             out.append((name, x, x + w))
             x += w + 3
@@ -1376,12 +1406,47 @@ class ChatPanel:
             save_settings(self.opts)
         tk.Checkbutton(win, text="Chime when a whisper arrives", variable=sound, command=set_sound, selectcolor=TAB,
                        activebackground=PANEL, activeforeground=INK, **look).pack(anchor="w", pady=(12, 0))
+        self.custom_tab_settings(win, look)
         self.watch_settings(win, look)
         tk.Button(win, text="Close", font=(FONT, 9), command=win.destroy).pack(anchor="e", pady=(14, 0))
         win.update_idletasks()
         x = self.root.winfo_x() + 20
         y = max(0, self.strip.root.winfo_y() - win.winfo_height() - 20)
         win.geometry(f"+{x}+{y}")
+
+    def set_custom_tab(self, custom: dict) -> None:
+        self.opts["custom_tab"] = custom
+        was_open = self.log.tab not in dict(TABS)  # the custom tab is open: it stays open when renamed
+        tabs = tabs_for(custom)
+        self.log.set_tabs(tabs, tabs[-2][0] if was_open and len(tabs) > len(TABS) else None)
+        self.opts["tab"] = self.log.tab
+        self.scroll = 0
+        save_settings(self.opts)
+        self.render()
+
+    def custom_tab_settings(self, win, look: dict) -> None:
+        """A tab of your own: its name and the chat types it shows."""
+        import tkinter as tk
+        check = {"selectcolor": TAB, "activebackground": PANEL, "activeforeground": INK, **look}
+        custom = {"on": False, "name": "Custom", "kinds": [], **(self.opts["custom_tab"] or {})}
+        on = tk.BooleanVar(value=custom["on"])
+        name = tk.StringVar(value=custom["name"])
+        picked = {k: tk.BooleanVar(value=k in custom["kinds"]) for k, _ in CUSTOM_KINDS}
+
+        def changed(*_):
+            self.set_custom_tab({"on": on.get(), "name": name.get().strip()[:12] or "Custom",
+                                 "kinds": [k for k, _ in CUSTOM_KINDS if picked[k].get()]})
+        row = tk.Frame(win, bg=PANEL)
+        row.pack(fill="x", pady=(14, 0))
+        tk.Checkbutton(row, text="A tab of my own, named", variable=on, command=changed, **check).pack(side="left")
+        tk.Entry(row, textvariable=name, width=13, font=(FONT, 10)).pack(side="left", padx=4)
+        name.trace_add("write", changed)
+        tk.Label(win, text="It shows:", anchor="w", bg=PANEL, fg=SOFT, font=(FONT, 9)).pack(fill="x")
+        grid = tk.Frame(win, bg=PANEL)
+        grid.pack(anchor="w")
+        for i, (k, label) in enumerate(CUSTOM_KINDS):
+            tk.Checkbutton(grid, text=label, variable=picked[k], command=changed, **check).grid(
+                row=i // 3, column=i % 3, sticky="w", padx=(0, 10))
 
     def watch_settings(self, win, look: dict) -> None:
         """The watch list: what to look out for, and how to be told."""
@@ -1598,7 +1663,7 @@ def print_replay(paths: list[Path]) -> None:
             print(f"  {kind_of(ln) or 'left out':>8}  [{ln.source}{', band' if ln.band else ''}] {ln.text}")
         for m in messages_from(lines, dedupe, time.time()):
             log.add(m)
-    for name, _ in TABS:
+    for name, _ in log.tabs:
         log.select(name)
         print(f"{name} tab:")
         for m in log.visible():

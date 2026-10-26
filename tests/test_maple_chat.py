@@ -280,3 +280,20 @@ def test_system_messages_can_be_hidden():
     assert [m["kind"] for m in log.visible()] == ["map"]
     log.hidden = set()  # shown again: the ones read meanwhile are back
     assert [m["kind"] for m in log.visible()] == ["system", "map"]
+
+
+def test_a_custom_tab_shows_the_chat_types_picked():
+    tabs = mc.tabs_for({"on": True, "name": "Friends", "kinds": ["whisper", "buddy", "watch"]})
+    assert [name for name, _ in tabs] == ["All", "Whisper", "Party", "Buddy", "Mega", "Friends", "Watch"]
+    log = mc.ChatLog(tabs=tabs, tab="Friends")
+    log.add(msg("whisper", "Nimbi"))
+    log.add(msg("map", "Rowan"))
+    log.add({**msg("mega", "Pebbles"), "watch": ["mentions mushmom"]})
+    assert [m["name"] for m in log.visible()] == ["Nimbi", "Pebbles"]
+    assert log.unread["All"] and log.unread["Watch"] and not log.unread["Friends"]
+    assert not log.unread["Mega"]  # that megaphone is in view here already
+    # turned off, or renamed: the tabs follow, and the open one falls back to All if it's gone
+    log.set_tabs(mc.tabs_for({"on": False}))
+    assert log.tab == "All" and "Friends" not in log.unread and log.unread["Watch"]
+    assert mc.tabs_for({"on": True, "name": "mega", "kinds": []})[5][0] == "Custom"  # can't take a fixed tab's name
+    assert "other" in mc.tabs_for({"on": True, "name": "Local", "kinds": ["map"]})[5][1]
