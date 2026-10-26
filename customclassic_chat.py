@@ -73,6 +73,7 @@ DEFAULTS = {
     "twitch_in_all": False,   # its chat in All too
     "relay_code": "",         # opt in: the guild relay's guild code (guild chat to Discord, the Discord channel back)
     "relay_share": False,     # send the guild chat this app reads to the relay
+    "relay_source": "guild",  # what's shared: "guild"; "map" or "whisper" only to test before the game has guild chat
     "relay_tab": False,       # the guild's Discord channel in a Discord tab
     "relay_reader": "",       # this install's random id for the relay (no name)
     "relay_admin": {},        # guild code -> admin key, for relays set up from here (to remove them)
@@ -2081,11 +2082,13 @@ class ChatPanel(ChatView):
         o, code = self.opts, guild_relay.guild_code(self.opts["relay_code"])
         if code and (o["relay_share"] or o["relay_tab"]) and not self.demo:
             self.relay = guild_relay.RelayClient(self.relay_base(), code, o["relay_reader"], self.events.put,
-                                                 o["relay_share"], o["relay_tab"])
+                                                 o["relay_share"], o["relay_tab"], o["relay_source"])
 
-    def set_relay(self, code: str, share: bool, tab: bool) -> None:
+    def set_relay(self, code: str, share: bool, tab: bool, source: str | None = None) -> None:
         self.opts["relay_code"] = guild_relay.guild_code(code)
         self.opts["relay_share"], self.opts["relay_tab"] = share, tab
+        if source in dict(guild_relay.SOURCES):
+            self.opts["relay_source"] = source
         save_settings(self.opts)
         self.start_relay()
         self.retab()

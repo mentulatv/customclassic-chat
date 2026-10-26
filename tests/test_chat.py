@@ -391,3 +391,26 @@ def test_the_right_click_menu_closes_once_the_pointer_is_well_away():
     assert mc.pointer_away(menu, (150, 200)) == 0  # on it
     assert mc.pointer_away(menu, (350, 200)) == 50  # just beside it: stays open (under 120)
     assert mc.pointer_away(menu, (150, 420)) == 160  # well below it: closes
+
+
+def test_guild_chat_switches_on_with_its_colour_alone():
+    import guild_relay
+    import reader
+    cfg = reader.Config()
+    cfg.colors = {**cfg.colors, "guild": [180, 120, 255]}  # the one value to add when the game has guild chat
+    assert reader._nearest([182, 118, 250], cfg.colors, cfg.color_tolerance) == "guild"
+    line = SimpleNamespace(source="guild", band=False, text="[18:49] Rowan : zakum at 8?")
+    [m] = mc.messages_from([line], mc.Dedupe(), 0.0)
+    assert (m["kind"], m["stamp"]) == ("guild", "18:49")
+    assert guild_relay.relay_line(m) == {"stamp": "18:49", "speaker": "Rowan", "text": "zakum at 8?", "kind": "guild"}
+    assert "guild" in dict(mc.TABS)["Buddy"] and "guild" in dict(mc.TABS)["All"]  # shown where buddy chat is
+    # buddy chat (and everything else) never goes, whatever is chosen to share
+    buddy = {**m, "kind": "buddy"}
+    assert all(guild_relay.relay_line(buddy, s) is None for s, _ in guild_relay.SOURCES)
+    assert guild_relay.relay_line({**m, "kind": "map"}, "map")["kind"] == "map"  # testing with map chat
+
+
+def test_guild_codes_are_read_forgivingly():
+    import guild_relay
+    assert guild_relay.guild_code(" abcd efgh ") == "ABCD-EFGH" == guild_relay.guild_code("ABCD-EFGH")
+    assert guild_relay.guild_code("ABC-1234") == ""  # 0, 1, O and I aren't used: easy to read out

@@ -50,6 +50,9 @@ COLORS = {  # the text colour of each chat type; a type may list several
     "item_megaphone": [[9, 69, 76], [70, 39, 6]],
     "super_megaphone": [119, 0, 66],
     "buddy_guild": [255, 153, 0],
+    # guild chat: not in the game yet. When it is, its text colour goes here (one screenshot with a few
+    # guild lines measures it), and guild chat becomes its own kind, shareable with a guild relay:
+    # "guild": [r, g, b],
     "whisper": [0, 255, 0],
     "notice": [[255, 175, 175], [255, 255, 0]],  # system text: pink, yellow
     "general": [255, 255, 255],  # map chat

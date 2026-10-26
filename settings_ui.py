@@ -413,6 +413,8 @@ class SettingsWindow:
         code = tk.StringVar(value=opts["relay_code"])
         share = tk.BooleanVar(value=opts["relay_share"])
         tab = tk.BooleanVar(value=opts["relay_tab"])
+        source = tk.StringVar(value=opts["relay_source"] if opts["relay_source"] in dict(guild_relay.SOURCES)
+                              else "guild")
 
         def later(fn, *args, then=None):
             """Ask the relay without freezing the window; `then` gets the answer (or the error)."""
@@ -426,9 +428,9 @@ class SettingsWindow:
             threading.Thread(target=work, daemon=True).start()
 
         c = card(page, "Guild chat relay", "Your guild's chat in the guild's Discord channel, posted once however "
-                                           "many members share it, and that channel back in a Discord tab. Only guild "
-                                           "chat is ever sent: never whispers, party, buddy or map chat. Off until "
-                                           "you turn it on; ask your guild first.")
+                                           "many members share it, and that channel back in a Discord tab. Only the "
+                                           "one kind of chat picked below is sent, nothing else. Off until you turn "
+                                           "it on; ask your guild first.")
         row = tk.Frame(c, bg=CARD)
         row.pack(fill="x")
         label(row, "Guild code").pack(side="left")
@@ -450,7 +452,8 @@ class SettingsWindow:
                 note.configure(text="A guild code looks like ABCD-EFGH.", fg=WARN)
                 return
             code.set(value)
-            app.set_relay(value, share.get(), tab.get())
+            app.set_relay(value, share.get(), tab.get(), source.get())
+            show_waiting()
             if value:
                 note.configure(text="Checking the code…", fg=SOFT)
                 later(guild_relay.guild_info, base, value, then=show_guild)
@@ -459,14 +462,29 @@ class SettingsWindow:
             show_admin()
         button(row, "Use", use).pack(side="left")
         field.bind("<Return>", use)
-        check(c, "Share my guild chat", share, use).pack(fill="x", pady=(8, 0))
-        check(c, "Show the guild's Discord channel in a Discord tab", tab, use).pack(fill="x")
-        if not app.guild_colour_known():
-            warn = label(c, "Guild chat isn't told apart from buddy chat yet (its colour hasn't been measured), "
-                            "so nothing is shared until it is.", size=9, wrap=470)
-            warn.configure(fg=WARN)
-            warn.pack(fill="x", pady=(6, 0))
+        check(c, "Share my chat with the relay:", share, use).pack(fill="x", pady=(8, 0))
+        row = tk.Frame(c, bg=CARD)
+        row.pack(fill="x", padx=(22, 0))
+        for value, text in guild_relay.SOURCES:
+            radio(row, text, source, value, use).pack(side="left", padx=(0, 12))
+        check(c, "Show the guild's Discord channel in a Discord tab", tab, use).pack(fill="x", pady=(4, 0))
+        waiting = label(c, "", size=9, wrap=470)
+        waiting.configure(fg=WARN)
+
+        def show_waiting():
+            if source.get() == "guild" and not app.guild_colour_known():
+                waiting.configure(text="The game doesn't have guild chat yet, so nothing is shared as guild chat. "
+                                       "To try the relay meanwhile, share map chat or whispers.")
+                waiting.pack(fill="x", pady=(6, 0), before=note)
+            elif source.get() != "guild":
+                waiting.configure(text=f"Testing: your {dict(guild_relay.SOURCES)[source.get()].split(' (')[0].lower()} "
+                                       "goes to the guild's Discord, labelled as such. Switch back to guild chat when "
+                                       "the game has it.")
+                waiting.pack(fill="x", pady=(6, 0), before=note)
+            else:
+                waiting.pack_forget()
         note.pack(fill="x", pady=(4, 0))
+        show_waiting()
         if guild_relay.guild_code(opts["relay_code"]):
             later(guild_relay.guild_info, base, guild_relay.guild_code(opts["relay_code"]), then=show_guild)
 

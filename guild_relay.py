@@ -4,7 +4,8 @@ A guild's members share one guild code. With "Share my guild chat" on, the guild
 reads go to the relay (with the game's own time stamp: server time, the same on every screen),
 which drops the copies other members send of the same message and posts each one to the
 guild's Discord channel once. With "Show the Discord channel" on, the channel's messages come
-back for a Discord tab. Only guild chat is ever sent: never whispers, party, buddy or map chat.
+back for a Discord tab. Only guild chat is ever sent: never whispers, party, buddy or map chat. (Until the game has
+guild chat, map chat or whispers can be sent instead, to test with: Settings says so plainly.)
 Nothing is ever typed into the game.
 """
 
@@ -17,6 +18,8 @@ import threading
 
 RELAY_URL = "https://mapleprice.mentula.tv"
 CODE = re.compile(r"^[A-Z2-9]{4}-?[A-Z2-9]{4}$")
+# what can be shared: guild chat, or, to test the relay before the game has guild chat, map chat or whispers
+SOURCES = [("guild", "Guild chat"), ("map", "Map chat (for testing)"), ("whisper", "Whispers (for testing)")]
 
 
 def guild_code(text: str) -> str:
@@ -33,11 +36,14 @@ def reader_id() -> str:
     return "pc-" + secrets.token_hex(8)
 
 
-def relay_line(msg: dict) -> dict | None:
-    """A guild message as the relay takes it, or None for anything that must not go."""
-    if msg.get("kind") != "guild" or not msg.get("stamp") or not msg.get("name") or not msg.get("body"):
+def relay_line(msg: dict, source: str = "guild") -> dict | None:
+    """A message as the relay takes it, or None for anything that must not go: only the one chat
+    type chosen to share (guild chat; map chat or whispers when testing), with the game's stamp."""
+    if source not in dict(SOURCES) or msg.get("kind") != source:
         return None
-    return {"stamp": msg["stamp"], "speaker": msg["name"][:20], "text": msg["body"][:300]}
+    if not msg.get("stamp") or not msg.get("name") or not msg.get("body"):
+        return None
+    return {"stamp": msg["stamp"], "speaker": msg["name"][:20], "text": msg["body"][:300], "kind": source}
 
 
 def _client():
@@ -74,9 +80,9 @@ class RelayClient:
     """Sends this app's guild lines to the relay and, if asked, brings the Discord channel back
     as messages for the Discord tab (handed to `put`, as the chat reader does)."""
 
-    def __init__(self, base: str, code: str, reader: str, put, share: bool, tab: bool):
+    def __init__(self, base: str, code: str, reader: str, put, share: bool, tab: bool, source: str = "guild"):
         self.base, self.code, self.reader, self.put = base, code, reader, put
-        self.share, self.tab = share, tab
+        self.share, self.tab, self.source = share, tab, source
         self.out: queue.Queue = queue.Queue()
         self.stopped = threading.Event()
         threading.Thread(target=self.run, daemon=True).start()
@@ -85,7 +91,7 @@ class RelayClient:
         self.stopped.set()
 
     def send(self, msg: dict) -> None:
-        line = relay_line(msg) if self.share else None
+        line = relay_line(msg, self.source) if self.share else None
         if line:
             self.out.put(line)
 
