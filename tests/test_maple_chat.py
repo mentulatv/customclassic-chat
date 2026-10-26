@@ -357,3 +357,18 @@ def test_wrapped_rows_join_where_the_game_broke_them():
     assert join_wrapped("MSCW 10", "% OFF") == "MSCW 10% OFF"
     assert join_wrapped("I'm on it.", "see you") == "I'm on it. see you"
     assert join_wrapped("meet me at", "Henesys") == "meet me at Henesys"
+
+
+def test_twitch_chat_gets_its_own_tab():
+    import twitch_chat
+    tabs = mc.tabs_for({"on": True, "name": "Friends", "kinds": ["whisper"]}, twitch=True)
+    assert [n for n, _ in tabs] == ["All", "Whisper", "Party", "Buddy", "Mega", "Twitch", "Friends", "Watch"]
+    assert "twitch" not in dict(tabs)["All"]
+    assert "twitch" in dict(mc.tabs_for(None, twitch=True, twitch_in_all=True))["All"]
+    assert mc.custom_name({"on": True, "name": "twitch"}) == "Custom"  # can't take the Twitch tab's name
+    assert (twitch_chat.channel_name("https://www.twitch.tv/MentulaTV"), twitch_chat.channel_name("a b")) == ("mentulatv", "")
+    line = ("@badge-info=;color=#0A0A0A;display-name=Nimbi;emotes= :nimbi!nimbi@nimbi.tmi.twitch.tv "
+            "PRIVMSG #mentulatv :\x01ACTION waves\x01")
+    m = twitch_chat.message(twitch_chat.parse(line), 0.0)
+    assert (m["kind"], m["name"], m["body"]) == ("twitch", "Nimbi", "waves")
+    assert m["fg"] != "#0a0a0a"  # too dark for the panel: lightened

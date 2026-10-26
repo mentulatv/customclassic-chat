@@ -99,6 +99,14 @@ Right-click the tray icon → **Settings…**. Changes apply right away and are 
 - The whisper chime
 - The watch list
 
+## Twitch chat (opt-in)
+
+Settings → tick **Twitch chat from the channel**, type the channel's name (or paste its
+twitch.tv link) and press **Use**. Its chat shows in a **Twitch** tab, each chatter in their
+own name colour, and in All too if you tick **Show it in All too**. The custom tab can show it
+as well. Maple Chat reads the chat as a guest, the way anyone can watch a channel's chat
+without logging in: no account, key or password, and it never writes in the chat.
+
 ## Watch list
 
 Settings… → **Watch list** → **Add…**. Each entry is a word or an item name:
@@ -121,7 +129,8 @@ Item names and usual prices come from the [Maple Price Index](https://mapleprice
 which builds them from [NiaMeowDB](https://meowdb.com) and
 [maplestory-classic.com](https://maplestory-classic.com) market data. Maple Chat downloads
 the list once an hour and keeps a copy in `cache/names.json`, so it still works offline.
-That download is the only thing Maple Chat fetches. Your chat never leaves your PC.
+That download (and, if you opt in, the Twitch chat you chose) is the only thing Maple Chat
+fetches. Your game chat never leaves your PC.
 
 ## How it works
 
@@ -169,8 +178,8 @@ each chat line of a saved screenshot lands in. Tests: `python -m pytest`.
 
 ## Roadmap
 
-- **Twitch chat** in its own tab, for streamers
-- **Discord channel** chat in its own tab
+- **Discord channel** chat in its own tab (opt-in, like Twitch)
+- **Chatting back**: logging in with Twitch or Discord to write in those chats from Maple Chat
 
 ## License
 

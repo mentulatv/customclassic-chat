@@ -35,6 +35,8 @@ import sys
 import threading
 import time
 from collections import deque
+
+import twitch_chat
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -63,6 +65,9 @@ DEFAULTS = {
     "ignore_names": [],       # your character names: their name tags behind the chat aren't chat
     "names_url": None,        # where item names and usual prices come from; None: the public price site
     "custom_tab": {"on": True, "name": "Custom", "kinds": ["whisper", "party", "buddy"]},  # a tab of your own
+    "twitch_on": False,       # opt in: a Twitch channel's chat in a Twitch tab
+    "twitch_channel": "",     # which channel
+    "twitch_in_all": False,   # its chat in All too
     "tab": "All",
     "box": None,              # the chat lines relative to the game window: dx, dy (from its bottom), w, h, line, cw, ch
     "extra": 0,               # pixels the panel reaches above the game's chat (dragged with the ≡ grip)
@@ -75,8 +80,9 @@ TABS = [("All", {"map", "whisper", "party", "buddy", "other", "system", "status"
         ("Watch", {"watch"})]  # Watch: the lines your watch list caught, whatever chat they came from
 # what the custom tab can show, as Settings lists them
 CUSTOM_KINDS = [("map", "Map chat"), ("whisper", "Whispers"), ("party", "Party"), ("buddy", "Buddy / guild"),
+                ("twitch", "Twitch chat"),
                 ("mega", "Megaphones"), ("system", "System messages"), ("watch", "Watch list catches")]
-COLORS = {"map": "#ffffff", "whisper": "#00ff00", "party": "#ff8fc7", "buddy": "#ff9900", "other": "#c8d2e4",
+COLORS = {"twitch": "#bf94ff", "map": "#ffffff", "whisper": "#00ff00", "party": "#ff8fc7", "buddy": "#ff9900", "other": "#c8d2e4",
           "mega": "#f2a7cf", "system": "#ffafaf", "status": "#ffc24b"}  # the game's own where measured; notes in amber
 # the game's own pop-ups that appear over the chat box: Maple Chat steps aside while one is up
 POPUP = re.compile(r"(?i)\b(?:party|guild|alliance|family)\s+invit\w*\s+from\b|\b(?:trade|friend|buddy)\s+request\s+from\b"
@@ -391,16 +397,27 @@ def save_message(path: Path, msg: dict) -> None:
         pass
 
 
-def tabs_for(custom: dict | None) -> list[tuple[str, set]]:
-    """The tabs: the fixed ones, and the custom tab (before Watch) when it's on. Map chat brings
-    the lines of no known chat type along, as All does."""
+def custom_name(custom: dict | None) -> str | None:
+    """The custom tab's name when it's on: its own, unless empty or a fixed tab's."""
     if not custom or not custom.get("on"):
-        return TABS
-    taken = {name.lower() for name, _ in TABS}
+        return None
     name = (custom.get("name") or "").strip()[:12]
-    name = name if name and name.lower() not in taken else "Custom"
-    kinds = set(custom.get("kinds") or []) | {"status"} | ({"other"} if "map" in (custom.get("kinds") or []) else set())
-    return TABS[:-1] + [(name, kinds)] + TABS[-1:]
+    taken = {n.lower() for n, _ in TABS} | {"twitch"}
+    return name if name and name.lower() not in taken else "Custom"
+
+
+def tabs_for(custom: dict | None, twitch: bool = False, twitch_in_all: bool = False) -> list[tuple[str, set]]:
+    """The tabs: the fixed ones, a Twitch tab after Mega when a channel is set (its chat in All
+    too if asked), and the custom tab before Watch when it's on. Map chat brings the lines of no
+    known chat type along, as All does."""
+    tabs = [(n, k | {"twitch"} if n == "All" and twitch and twitch_in_all else k) for n, k in TABS]
+    if twitch:
+        tabs.insert(5, ("Twitch", {"twitch", "status"}))
+    name = custom_name(custom)
+    if name:
+        picked = set(custom.get("kinds") or [])
+        tabs.insert(len(tabs) - 1, (name, picked | {"status"} | ({"other"} if "map" in picked else set())))
+    return tabs
 
 
 def shows(kinds: set, msg: dict) -> bool:
@@ -921,7 +938,7 @@ class ChatPanel:
         self.overlay, self.opts, self.demo = overlay, opts, demo
         self.always_show, self.verbose = always_show, verbose
         self.events: queue.Queue = queue.Queue()
-        self.log = ChatLog(opts["history"], opts["tab"], tabs_for(opts["custom_tab"]))
+        self.log = ChatLog(opts["history"], opts["tab"], self.tabs())
         self.log.hidden = set() if opts["system_messages"] else {"system"}
         if not isinstance(opts["hide_padded"], list):  # an on/off from before the kinds were told apart
             opts["hide_padded"] = [k for k, _ in PADDED_KINDS] if opts["hide_padded"] else []
@@ -974,6 +991,8 @@ class ChatPanel:
         self.watcher = watch.Watcher(watch.load_entries(opts["watch"]), kinds=self.watch_kinds())
         self.toast = None
         threading.Thread(target=self.load_names, daemon=True).start()
+        self.twitch = None
+        self.start_twitch()
         threading.Thread(target=overlay.hotkey_thread, args=(self.events, HOTKEYS), daemon=True).start()
         threading.Thread(target=demo_loop if demo else read_loop, args=(self,), daemon=True).start()
         self.tray = start_tray(self)
@@ -1224,6 +1243,8 @@ class ChatPanel:
             self.user_hidden = not self.user_hidden
         elif hk == HK_QUIT:
             self.stop.set()
+            if self.twitch:
+                self.twitch.stop()
             if self.tray:
                 self.tray.stop()
             self.root.destroy()
@@ -1439,21 +1460,26 @@ class ChatPanel:
         self.render()
 
     def open_settings(self) -> None:
-        """A small window with the text size and peek sliders; changes apply as you drag."""
+        """The settings window, in two columns: how the panel looks on the left, what it shows on
+        the right. Changes apply as you make them."""
         import tkinter as tk
         if self.settings is not None and self.settings.winfo_exists():
             self.settings.deiconify()
             self.settings.lift()
             return
-        win = self.settings = tk.Toplevel(self.root)
-        win.title("Maple Chat settings")
-        win.configure(bg=PANEL, padx=18, pady=14)
-        win.resizable(False, False)
-        win.attributes("-topmost", True)
+        top = self.settings = tk.Toplevel(self.root)
+        top.title("Maple Chat settings")
+        top.configure(bg=PANEL, padx=18, pady=14)
+        top.resizable(False, False)
+        top.attributes("-topmost", True)
         try:
-            win.iconbitmap(str(save_icon(CACHE_DIR / "maple_chat.ico")))
+            top.iconbitmap(str(save_icon(CACHE_DIR / "maple_chat.ico")))
         except Exception:
             pass
+        cols = tk.Frame(top, bg=PANEL)
+        cols.pack(fill="both")
+        win = tk.Frame(cols, bg=PANEL)  # the left column
+        win.pack(side="left", anchor="n", padx=(0, 28))
         look = {"bg": PANEL, "fg": INK, "font": (FONT, 10)}
         slider = {"orient": "horizontal", "length": 320, "bg": PANEL, "fg": INK, "troughcolor": TAB,
                   "highlightthickness": 0, "activebackground": TAB_ON, "font": (FONT, 9)}
@@ -1531,9 +1557,12 @@ class ChatPanel:
             tk.Button(row, text=label, font=(FONT, 9), command=lambda k=key: self.pick_colour(k)).pack(side="left", padx=1)
         tk.Button(win, text="Reset to default colours", font=(FONT, 9), command=self.reset_colours).pack(anchor="w", pady=(4, 0))
 
+        win = tk.Frame(cols, bg=PANEL)  # the right column
+        win.pack(side="left", anchor="n")
+
         # your characters' name tags show through the chat box when they walk behind it
-        tk.Label(win, text="Your character names, comma separated (their name tags behind the chat aren't chat)",
-                 anchor="w", **look).pack(fill="x", pady=(12, 0))
+        tk.Label(win, text="Your character names, comma separated\n(their name tags behind the chat aren't chat)",
+                 anchor="w", justify="left", **look).pack(fill="x")
         names = tk.StringVar(value=", ".join(self.opts["ignore_names"]))
 
         def set_names(*_):
@@ -1575,19 +1604,86 @@ class ChatPanel:
         tk.Checkbutton(win, text="Chime when a whisper arrives", variable=sound, command=set_sound, selectcolor=TAB,
                        activebackground=PANEL, activeforeground=INK, **look).pack(anchor="w", pady=(12, 0))
         self.custom_tab_settings(win, look)
+        self.twitch_settings(win, look)
         self.watch_settings(win, look)
-        tk.Button(win, text="Close", font=(FONT, 9), command=win.destroy).pack(anchor="e", pady=(14, 0))
-        win.update_idletasks()
-        x = self.root.winfo_x() + 20
-        y = max(0, self.strip.root.winfo_y() - win.winfo_height() - 20)
-        win.geometry(f"+{x}+{y}")
+        tk.Button(top, text="Close", font=(FONT, 9), command=top.destroy).pack(anchor="e", pady=(14, 0))
+        top.update_idletasks()  # above the panel, kept on the screen
+        sw, sh = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
+        x = max(0, min(self.root.winfo_x() + 20, sw - top.winfo_width() - 10))
+        y = max(0, min(self.strip.root.winfo_y() - top.winfo_height() - 20, sh - top.winfo_height() - 60))
+        top.geometry(f"+{x}+{y}")
+
+    def tabs(self) -> list:
+        o = self.opts
+        return tabs_for(o["custom_tab"], self.twitch_channel() is not None, o["twitch_in_all"])
+
+    def retab(self, rename: tuple[str | None, str | None] = (None, None)) -> None:
+        """The tabs again after a setting changed; a renamed tab that was open stays open."""
+        old, new = rename
+        self.log.set_tabs(self.tabs(), new if old and self.log.tab == old else None)
+        self.opts["tab"] = self.log.tab
+
+    def twitch_channel(self) -> str | None:
+        """The Twitch channel to read: only when opted in and a channel is set."""
+        name = twitch_chat.channel_name(self.opts["twitch_channel"])
+        return name if self.opts["twitch_on"] and name else None
+
+    def start_twitch(self) -> None:
+        """Read the Twitch channel set in Settings, if opted in; a new channel replaces the old."""
+        if self.twitch:
+            self.twitch.stop()
+            self.twitch = None
+        channel = self.twitch_channel()
+        if channel and not self.demo:
+            self.twitch = twitch_chat.TwitchChat(channel, self.events.put)
+
+    def set_twitch(self, on: bool, channel: str, in_all: bool) -> None:
+        before = self.twitch_channel()
+        self.opts["twitch_on"], self.opts["twitch_in_all"] = on, in_all
+        self.opts["twitch_channel"] = twitch_chat.channel_name(channel)
+        if self.twitch_channel() != before:
+            self.start_twitch()
+        self.retab()
+        self.scroll = 0
+        save_settings(self.opts)
+        self.render()
+
+    def twitch_settings(self, win, look: dict) -> None:
+        """Twitch chat, opted into here: a channel's chat in its own tab, and in All too if wanted."""
+        import tkinter as tk
+        check = {"selectcolor": TAB, "activebackground": PANEL, "activeforeground": INK, **look}
+        on = tk.BooleanVar(value=self.opts["twitch_on"])
+        channel = tk.StringVar(value=self.opts["twitch_channel"])
+        in_all = tk.BooleanVar(value=self.opts["twitch_in_all"])
+        note = tk.Label(win, anchor="w", bg=PANEL, fg=SOFT, font=(FONT, 9))
+
+        def use(*_):
+            name = twitch_chat.channel_name(channel.get())
+            if channel.get().strip() and not name:
+                note.configure(text="That isn't a Twitch channel name (letters, numbers and _).", fg=WARN)
+                return
+            if on.get() and not name:
+                note.configure(text="Type the channel's name, then press Use.", fg=WARN)
+            channel.set(name)
+            self.set_twitch(on.get(), name, in_all.get())
+            if self.twitch_channel():
+                note.configure(text=f"Reading #{name}'s chat as a guest: no login needed.", fg=SOFT)
+            elif not on.get():
+                note.configure(text="Off.", fg=SOFT)
+        row = tk.Frame(win, bg=PANEL)
+        row.pack(fill="x", pady=(14, 0))
+        tk.Checkbutton(row, text="Twitch chat from the channel", variable=on, command=use, **check).pack(side="left")
+        field = tk.Entry(row, textvariable=channel, width=16, font=(FONT, 10))
+        field.pack(side="left", padx=4)
+        tk.Button(row, text="Use", font=(FONT, 9), width=5, command=use).pack(side="left")
+        field.bind("<Return>", use)
+        tk.Checkbutton(win, text="Show it in All too", variable=in_all, command=use, **check).pack(anchor="w")
+        note.pack(fill="x")
 
     def set_custom_tab(self, custom: dict) -> None:
+        old = custom_name(self.opts["custom_tab"])
         self.opts["custom_tab"] = custom
-        was_open = self.log.tab not in dict(TABS)  # the custom tab is open: it stays open when renamed
-        tabs = tabs_for(custom)
-        self.log.set_tabs(tabs, tabs[-2][0] if was_open and len(tabs) > len(TABS) else None)
-        self.opts["tab"] = self.log.tab
+        self.retab((old, custom_name(custom)))
         self.scroll = 0
         save_settings(self.opts)
         self.render()
