@@ -234,6 +234,21 @@ class SettingsWindow:
                  "Ctrl+Alt+F3 does the same.")
         button(c, "Reset position", lambda: (app.reset_position(), unlocked.set(False))).pack(anchor="w")
 
+        c = card(page, "Extra chat windows",
+                 "More chat windows, each with its own tab, anywhere on screen, even outside the game: say the "
+                 "game's chat in its place and All off to the side. Close one with the ✕ on its tab row.")
+        row = tk.Frame(c, bg=CARD)
+        row.pack(fill="x")
+        button(row, "Add a chat window", app.add_window, primary=True).pack(side="left")
+        count = label(row, "", soft=True, size=9)
+        count.pack(side="left", padx=(12, 0))
+
+        def show_count():
+            n = sum(1 for w in app.windows if not w.docked)
+            count.configure(text="No extra windows yet." if not n else f"{n} extra window{'s' if n != 1 else ''} open.")
+        app.settings_vars["windows"] = lambda: count.winfo_exists() and show_count()
+        show_count()
+
     def chat(self, page) -> None:
         app, opts = self.app, self.opts
         from customclassic_chat import PADDED_KINDS
@@ -322,6 +337,22 @@ class SettingsWindow:
         grid.pack(fill="x")
         for i, (k, text) in enumerate(CUSTOM_KINDS):
             check(grid, text, picked[k], changed).grid(row=i // 2, column=i % 2, sticky="w", padx=(0, 30), pady=1)
+
+        c = card(page, "Split the chat", "A second pane on top of the chat with its own row of tabs, say Mega "
+                                         "above and All below. It moves with the chat; drag its ≡ to make it "
+                                         "taller and click its ✕ to close it.")
+        row = tk.Frame(c, bg=CARD)
+        row.pack(fill="x")
+        button(row, "Split the chat", app.add_split, primary=True).pack(side="left")
+        note = label(row, "", soft=True, size=9)
+        note.pack(side="left", padx=(12, 0))
+
+        def show_splits():
+            n = sum(1 for w in app.windows if w.docked)
+            note.configure(text="Not split." if not n else f"Split into {n + 1} panes.")
+        refresh = app.settings_vars.get("windows")
+        app.settings_vars["windows"] = lambda: (note.winfo_exists() and show_splits(), refresh and refresh())
+        show_splits()
 
     def twitch(self, page) -> None:
         app, opts = self.app, self.opts

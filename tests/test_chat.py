@@ -372,3 +372,15 @@ def test_twitch_chat_gets_its_own_tab():
     m = twitch_chat.message(twitch_chat.parse(line), 0.0)
     assert (m["kind"], m["name"], m["body"]) == ("twitch", "Nimbi", "waves")
     assert m["fg"] != "#0a0a0a"  # too dark for the panel: lightened
+
+
+def test_another_window_has_its_own_tab_on_the_same_chat():
+    log = mc.ChatLog(tab="Mega")
+    side = log.view_of("All")
+    msg_map, msg_mega = msg("map", "Rowan"), msg("mega", "Kestrel")
+    for m in (msg_map, msg_mega):
+        log.add(m)
+        side.notice(m)
+    assert [m["name"] for m in log.visible()] == ["Kestrel"] and [m["name"] for m in side.visible()] == ["Rowan"]
+    assert log.unread["All"] and not side.unread["All"] and side.unread["Mega"]  # each its own dots
+    assert len(side.messages) == 2  # one chat: added once, seen in both

@@ -76,6 +76,7 @@ DEFAULTS = {
     "extra": 0,               # pixels the panel reaches above the game's chat (dragged with the ≡ grip)
     "unlocked": False,        # placed anywhere you like instead of on the game's chat (it still reads the game's chat)
     "free": None,             # where it sits then, on screen: left, top, width, height
+    "windows": [],            # extra chat windows: each its tab, place ("free") and see-through
 }
 MEGAPHONES = {"megaphone", "super_megaphone", "item_megaphone"}
 TABS = [("All", {"map", "whisper", "party", "buddy", "other", "system", "status"}), ("Whisper", {"whisper", "status"}),
@@ -448,8 +449,19 @@ class ChatLog:
     def kinds(self, tab: str | None = None) -> set:
         return dict(self.tabs)[tab or self.tab]
 
+    def view_of(self, tab: str = "All") -> "ChatLog":
+        """Another window's view of the same messages: its own tab and unread marks, the same
+        chat (and the same hidden kinds). Hand it each new message with notice()."""
+        view = ChatLog(tab=tab, tabs=self.tabs)
+        view.messages, view.hidden, view.hide_padded = self.messages, self.hidden, self.hide_padded
+        return view
+
     def add(self, msg: dict) -> None:
         self.messages.append(msg)
+        self.notice(msg)
+
+    def notice(self, msg: dict) -> None:
+        """Mark the tabs a new message landed in, where it isn't in view."""
         if msg["kind"] == "status" or msg["kind"] in self.hidden or msg.get("padded") in self.hide_padded:
             return  # nothing to miss
         showing = self.kinds()
@@ -714,6 +726,8 @@ def start_tray(app):
         pystray.MenuItem("Adjust position", send("hotkey", HK_EDIT)),
         pystray.MenuItem("Unlocked (place it anywhere)", send("unlock", None), checked=lambda item: app.opts["unlocked"]),
         pystray.MenuItem("Reset position", send("hotkey", HK_FIT)),
+        pystray.MenuItem("Split the chat", send("split", None)),
+        pystray.MenuItem("New chat window", send("window", None)),
         pystray.MenuItem("See-through", send("see_through", None), checked=lambda item: app.opts["see_through"]),
         pystray.MenuItem("Settings…", send("settings", None)),
         pystray.Menu.SEPARATOR,
@@ -943,7 +957,358 @@ def demo_loop(app) -> None:
 # ------------------------------------------------------------------ the panel
 
 
-class ChatPanel:
+class ChatView:
+    """One chat window: its tab strip and messages, its tab, scrolling and see-through. The main
+    panel is one (on the game's chat box, or wherever it was unlocked to); extra windows are
+    others, each wherever it was put. They all show the same chat, read once."""
+
+    closable = False  # an ✕ on the tab strip (extra windows)
+
+    def build(self, title: str, master=None) -> None:
+        overlay = self.app.overlay
+        self.msgs = overlay.Overlay(title, 40, 40, 400, 100, master=master, click_through=False)
+        self.strip = overlay.Overlay(f"{title} tabs", 40, 20, 400, 20, master=self.msgs.root, click_through=False)
+        for w in (self.msgs, self.strip):
+            w.canvas.configure(bg=self.opts["panel_bg"] or PANEL)
+            w.canvas.bind("<MouseWheel>", self.on_wheel)
+        self.strip.canvas.configure(bg=STRIP)
+        self.strip.canvas.bind("<ButtonPress-1>", self.on_strip_click)
+        self.strip.canvas.bind("<B1-Motion>", self.on_grip_drag)
+        self.strip.canvas.bind("<ButtonRelease-1>", self.on_grip_release)
+        self.msgs.canvas.bind("<ButtonPress-1>", self.on_press)
+        self.msgs.canvas.bind("<B1-Motion>", self.on_drag)
+        self.msgs.canvas.bind("<ButtonRelease-1>", self.on_release)
+        self.scroll = 0            # messages scrolled up from the newest
+        self.in_view = 1           # messages that fit at the last drawing
+        self.bar = None            # what the mouse is doing on the scrollbar: ("thumb", grab offset) / ("repeat", step)
+        self.repeat_id = None
+        self.grip = None           # the ≡ grip being dragged: (screen y it started at, extra then, rect then)
+        self.drag = None           # moving or resizing in adjust mode
+        self._where = None
+
+    @property
+    def hwnds(self) -> set:
+        return {self.msgs.hwnd, self.strip.hwnd}
+
+    def show(self, visible: bool) -> None:
+        self.msgs.show(visible or self.msgs.edit)
+        self.strip.show(visible or self.msgs.edit)
+
+    def set_edit(self, on: bool) -> bool:
+        """Adjust mode on or off; True when it was just ended (time to keep the new place)."""
+        if self.msgs.edit == on:
+            return False
+        ended = self.msgs.toggle_edit()
+        self.strip.edit = self.msgs.edit
+        self.apply_see_through()  # solid while adjusting
+        self.render()
+        return ended
+
+    # placing ----------------------------------------------------------------
+
+    def place(self, r: dict) -> None:
+        """The whole window inside r: the tab strip as its top line, the messages below it."""
+        sh = strip_height(self.line)
+        where = (r["left"], r["top"], r["width"], r["height"], sh)
+        if where == self._where:
+            return
+        self._where = where
+        self.strip.place(r["left"], r["top"], r["width"], sh)
+        self.msgs.place(r["left"], r["top"] + sh, r["width"], max(sh, r["height"] - sh))
+        self.render()
+
+    def panel_now(self) -> dict:
+        """The window's rect as it sits on screen (tab strip and messages together)."""
+        return {"left": self.msgs.root.winfo_x(), "top": self.strip.root.winfo_y(), "width": self.msgs.width,
+                "height": self.strip.height + self.msgs.height}
+
+    def keep_on_screen(self, free: dict) -> dict:
+        """A place put somewhere that's off every monitor (one unplugged since) comes back to the
+        middle of the game window or the main screen."""
+        if on_screen({**free, "height": strip_height(self.line)}):
+            return free
+        game = self.app.game
+        area = game["client"] if game else {"left": 0, "top": 0, "width": self.msgs.root.winfo_screenwidth(),
+                                            "height": self.msgs.root.winfo_screenheight()}
+        return rescued(free, area)
+
+    def apply_see_through(self) -> None:
+        """◐ on: the messages see-through, and clicks go to whatever is below. The tab strip
+        stays solid and clickable, so ◐ can always be clicked off again."""
+        on = bool(self.see_through) and not self.msgs.edit
+        self.msgs.set_alpha(self.opts["peek_alpha"] if on else self.opts["opacity"])
+        self.strip.set_alpha(self.opts["opacity"])
+        self.msgs.through = on
+        self.msgs.click_through(on)
+
+    # the tab strip ----------------------------------------------------------
+
+    def tab_spans(self) -> list[tuple[str, int, int]]:
+        x, out, pad = strip_height(self.line) + 6, [], 10  # after the ≡ grip
+        for name, _ in self.log.tabs:
+            w = self.tab_font.measure(name) + 2 * pad
+            out.append((name, x, x + w))
+            x += w + 3
+        return out
+
+    def on_strip_click(self, e) -> None:
+        sh = strip_height(self.line)
+        if e.x < sh + 4:  # the ≡ grip: drag up or down to resize, like the game's chat
+            self.grip = (e.y_root, self.opts["extra"], self.panel_now())
+            return
+        if e.x >= self.strip.width - sh - 4:  # the rightmost button: ✕ on an extra window, else ◐
+            if self.closable:
+                self.close()
+                return
+            self.toggle_see_through()
+        elif self.closable and e.x >= self.strip.width - 2 * sh - 8:
+            self.toggle_see_through()
+        elif e.x >= self.strip.width - 2 * sh - 8 and self.warning():
+            self.dismiss_warning()
+        for name, x0, x1 in self.tab_spans():
+            if x0 <= e.x < x1:
+                self.log.select(name)
+                self.scroll = 0
+                self.tab_chosen(name)
+        self.render()
+
+    def on_grip_drag(self, e) -> None:
+        if self.grip and self.is_free:  # grows upward from its bottom, like the game's chat
+            y0, _, p = self.grip
+            bottom = p["top"] + p["height"]
+            h = max(2 * round(self.line) + strip_height(self.line), p["height"] + (y0 - e.y_root))
+            self.place({**p, "top": bottom - h, "height": h})
+        elif self.grip:
+            self.grip_on_chat(e)
+
+    def on_grip_release(self, e) -> None:
+        if self.grip:
+            self.grip = None
+            if self.is_free:
+                self.keep(self.panel_now())
+            save_settings(self.opts)
+
+    # scrolling, like the game's chat ---------------------------------------
+
+    def scroll_to(self, scroll: int) -> None:
+        most = max(0, len(self.log.visible()) - max(1, self.in_view))
+        self.scroll = max(0, min(most, scroll))
+
+    def on_wheel(self, e) -> None:
+        self.scroll_to(self.scroll + max(1, abs(e.delta) // 120) * (1 if e.delta > 0 else -1))
+        self.render()
+
+    def bar_hit(self, y: int) -> str:
+        """Which part of the scrollbar is at height y: up, down, thumb, page_up or page_down."""
+        b, h = self.bar_px, self.msgs.height
+        if y < b:
+            return "up"
+        if y >= h - b:
+            return "down"
+        top, size = thumb(len(self.log.visible()), self.in_view, self.scroll, h, b)
+        return "thumb" if top <= y < top + size else ("page_up" if y < top else "page_down")
+
+    def step(self, part: str) -> None:
+        """One step of a held arrow or track click; repeats while the button is held, like the game's."""
+        n = {"up": 1, "down": -1, "page_up": max(1, self.in_view - 1), "page_down": -max(1, self.in_view - 1)}[part]
+        self.scroll_to(self.scroll + n)
+        self.render()
+        self.repeat_id = self.msgs.root.after(350 if self.repeat_id is None else 70, self.step, part)
+
+    def on_press(self, e) -> None:
+        if self.msgs.edit:
+            near_corner = e.x > self.msgs.width - 16 and e.y > self.msgs.height - 16
+            p = self.panel_now()
+            self.drag = ("size" if near_corner else "move", e.x_root, e.y_root, p["left"], p["top"], p["width"],
+                         p["height"])
+            return
+        if e.x >= self.msgs.width - self.bar_px:
+            part = self.bar_hit(e.y)
+            if part == "thumb":
+                top, _ = thumb(len(self.log.visible()), self.in_view, self.scroll, self.msgs.height, self.bar_px)
+                self.bar = ("thumb", e.y - top)
+            else:
+                self.bar, self.repeat_id = ("repeat", part), None
+                self.step(part)
+
+    def on_release(self, e) -> None:
+        if self.repeat_id is not None:
+            self.msgs.root.after_cancel(self.repeat_id)
+        self.bar, self.repeat_id, self.drag = None, None, None
+
+    def on_drag(self, e) -> None:
+        if self.bar and self.bar[0] == "thumb":
+            b, total = self.bar_px, len(self.log.visible())
+            _, size = thumb(total, self.in_view, self.scroll, self.msgs.height, b)
+            self.scroll_to(scroll_at(e.y - self.bar[1], total, self.in_view, self.msgs.height, b, size))
+            self.render()
+            return
+        if not (self.msgs.edit and self.drag):
+            return
+        mode, x0, y0, left, top, w, h = self.drag
+        dx, dy = e.x_root - x0, e.y_root - y0
+        if mode == "move":
+            self.place({"left": left + dx, "top": top + dy, "width": w, "height": h})
+        else:
+            self.place({"left": left, "top": top, "width": max(200, w + dx), "height": max(2 * round(self.line), h + dy)})
+
+    # drawing ----------------------------------------------------------------
+
+    def render(self) -> None:
+        self.render_strip()
+        self.render_messages()
+
+    def render_strip(self) -> None:
+        c, h = self.strip.canvas, self.strip.height
+        c.delete("all")
+        g = h - 4  # the ≡ grip
+        c.create_rectangle(4, 2, 4 + g, h - 2, fill=TAB, outline="")
+        for i in (-1, 0, 1):
+            y = h // 2 + 1 + i * max(3, h // 6)
+            c.create_line(8, y, g, y, fill=SOFT, width=2)
+        for name, x0, x1 in self.tab_spans():
+            on = name == self.log.tab
+            c.create_rectangle(x0, 2, x1, h, fill=TAB_ON if on else TAB, outline="")
+            c.create_text((x0 + x1) // 2, h // 2 + 1, text=name, fill=INK if on else SOFT, font=self.tab_font)
+            if self.log.unread.get(name):
+                r = max(3, h // 6)
+                c.create_oval(x1 - 2 * r - 2, 3, x1 - 2, 3 + 2 * r, fill=GOLD if name == "Watch" else DOT, outline="")
+        s = h - 4
+        x = self.strip.width - s - 4
+        if self.closable:  # ✕ at the right end, ◐ beside it
+            c.create_rectangle(x, 2, x + s, h - 2, fill=TAB, outline="")
+            c.create_text(x + s // 2, h // 2 + 1, text="✕", fill=SOFT, font=self.tab_font)
+            x -= s + 4
+        c.create_rectangle(x, 2, x + s, h - 2, fill=TAB_ON if self.see_through else TAB, outline="")
+        c.create_text(x + s // 2, h // 2 + 1, text="◐", fill=INK if self.see_through else SOFT, font=self.tab_font)
+        if self.warning():  # quiet: an amber mark, explained once a session; a click puts it away
+            c.create_text(x - 4 - s // 2, h // 2 + 1, text="⚠", fill=WARN, font=self.tab_font)
+
+    def render_messages(self) -> None:
+        c, w, h = self.msgs.canvas, self.msgs.width, self.msgs.height
+        c.delete("all")
+        b, pad = self.bar_px, 6
+        shown = self.log.visible()
+        end = len(shown) - self.scroll
+        y, fits = h - 2, 0
+        for m in reversed(shown[:max(0, end)]):
+            star = "★ " if m.get("watch") and self.log.tab != "Watch" else ""
+            t = c.create_text(pad, 0, anchor="nw", text=star + line_text(m, self.opts["timestamps"]),
+                              fill=self.opts["colors"].get(m["kind"]) or m.get("fg") or COLORS[m["kind"]],
+                              font=self.font, width=w - 2 * pad - b)
+            th = c.bbox(t)[3]
+            c.move(t, 0, y - th)
+            if m.get("bg"):  # a megaphone's band, as the game draws it
+                band = c.create_rectangle(0, y - th, w - b - 1, y, fill=m["bg"], outline="")
+                c.tag_lower(band)
+            if m.get("watch"):  # caught by the watch list: a gold edge
+                c.create_rectangle(0, y - th, 2, y - 1, fill=GOLD, outline="")
+            y -= th
+            if y < 0:
+                break
+            fits += 1
+        self.in_view = max(1, fits)
+        self.render_scrollbar(c, w, h, b, len(shown))
+
+    def render_scrollbar(self, c, w: int, h: int, b: int, total: int) -> None:
+        """The game's scrollbar, lying over the game's own: a dark divider, a light track, arrow
+        buttons at both ends and a thumb to drag."""
+        divider = max(1, round(b / 6))
+        c.create_rectangle(w - b, 0, w - b + divider - 1, h - 1, fill="#1a1f2a", outline="")
+        x0, b = w - b + divider, b - divider  # the track: arrows and thumb are as wide as it
+        c.create_rectangle(x0, 0, w - 1, h - 1, fill=SB_TRACK, outline=SB_EDGE)
+        for y0, up in ((0, True), (h - b, False)):
+            c.create_rectangle(x0, y0, w - 1, y0 + b - 1, fill=SB_BUTTON, outline=SB_EDGE)
+            m, a = x0 + b / 2, b * 0.28
+            pts = (m - a, y0 + b * 0.62, m + a, y0 + b * 0.62, m, y0 + b * 0.36) if up else \
+                (m - a, y0 + b * 0.38, m + a, y0 + b * 0.38, m, y0 + b * 0.64)
+            c.create_polygon(*pts, fill=SB_ARROW, outline="")
+        top, size = thumb(total, self.in_view, self.scroll, h, b)
+        if total > self.in_view:
+            c.create_rectangle(x0 + 2, top, w - 3, top + size - 1, fill=SB_THUMB, outline=SB_EDGE)
+        if self.msgs.edit:
+            c.create_rectangle(1, 1, w - 2, h - 2, outline="#9db1d3", dash=(4, 3))
+            c.create_rectangle(w - 14, h - 14, w - 2, h - 2, fill="#9db1d3", outline="")
+            c.create_text(w // 2, h // 2, text="Drag to move, corner to resize. Ctrl+Alt+F5 saves.", fill=INK,
+                          font=self.tab_font)
+
+
+class ExtraChat(ChatView):
+    """An extra chat window: the same chat, with its own tab, place and see-through. Added from
+    the tray menu or Settings, closed with the ✕ on its tab strip; remembered in chat.json."""
+
+    closable = True
+
+    def __init__(self, app, conf: dict):
+        self.app, self.conf = app, conf  # conf: its entry in opts["windows"], saved as it changes
+        self.log = app.log.view_of(conf.get("tab") or "All")
+        self.build("CustomClassic Chat window", master=app.root)
+        self.apply_see_through()
+
+    # what the main panel knows, shared
+    opts = property(lambda self: self.app.opts)
+    line = property(lambda self: self.app.line)
+    font = property(lambda self: self.app.font)
+    tab_font = property(lambda self: self.app.tab_font)
+    bar_px = property(lambda self: bar_width(self.app.line))  # its own scrollbar: not over the game's
+    is_free = True
+
+    @property
+    def see_through(self) -> bool:
+        return bool(self.conf.get("see_through"))
+
+    def toggle_see_through(self) -> None:
+        self.conf["see_through"] = not self.see_through
+        save_settings(self.opts)
+        self.apply_see_through()
+
+    def warning(self) -> None:
+        return None
+
+    def tab_chosen(self, name: str) -> None:
+        self.conf["tab"] = name
+        save_settings(self.opts)
+
+    @property
+    def docked(self) -> bool:
+        """A split: docked on top of the main panel, as wide as it and moving with it."""
+        return self.conf.get("dock") == "above"
+
+    def keep(self, rect: dict) -> None:
+        if self.docked:  # only its height is its own
+            self.conf["height"] = rect["height"]
+        else:
+            self.conf["free"] = rect
+        save_settings(self.opts)
+
+    def keep_adjusted(self) -> None:
+        self.keep(self.panel_now())
+
+    def set_edit(self, on: bool) -> bool:
+        return False if self.docked else ChatView.set_edit(self, on)  # a split goes where the panel goes
+
+    def follow(self) -> None:
+        if self.docked:
+            if not self.grip:
+                p = self.app.placed()
+                h = int(self.conf.get("height") or 120)
+                self.place({"left": p["left"], "top": p["top"] - h, "width": p["width"], "height": h})
+            return
+        if not self.msgs.edit and not self.grip and self.conf.get("free"):
+            free = self.keep_on_screen(self.conf["free"])
+            if free != self.conf["free"]:
+                self.keep(free)
+            self.place(free)
+
+    def close(self) -> None:
+        self.app.close_window(self)
+
+    def destroy(self) -> None:
+        self.strip.root.destroy()
+        self.msgs.root.destroy()
+
+
+class ChatPanel(ChatView):
     def __init__(self, opts: dict, demo: bool = False, always_show: bool = False, verbose: bool = False):
         import overlay
         self.overlay, self.opts, self.demo = overlay, opts, demo
@@ -962,27 +1327,11 @@ class ChatPanel:
         self.game = None           # set here, read by the reading thread
         self.read_rect = None      # the chat lines in the game's client coordinates
         self.want_fit = not opts["box"]
-        self.scroll = 0            # messages scrolled up from the newest
-        self.in_view = 1           # messages that fit in the panel at the last drawing
-        self.bar = None            # what the mouse is doing on the scrollbar: ("thumb", grab offset) / ("repeat", step)
-        self.repeat_id = None
         self.user_hidden = False
         self.line = (opts["box"] or {}).get("line") or 24.0
-        self.msgs = overlay.Overlay("CustomClassic Chat", 40, 40, 400, 100, click_through=False)
+        self.app, self.windows = self, []  # the main panel is a chat window too; extra ones come later
+        self.build("CustomClassic Chat")
         self.root = self.msgs.root
-        self.strip = overlay.Overlay("CustomClassic Chat tabs", 40, 20, 400, 20, master=self.root, click_through=False)
-        for w in (self.msgs, self.strip):
-            w.canvas.configure(bg=self.opts["panel_bg"] or PANEL)
-            w.canvas.bind("<MouseWheel>", self.on_wheel)
-        self.strip.canvas.configure(bg=STRIP)
-        self.strip.canvas.bind("<ButtonPress-1>", self.on_strip_click)
-        self.strip.canvas.bind("<B1-Motion>", self.on_grip_drag)
-        self.strip.canvas.bind("<ButtonRelease-1>", self.on_grip_release)
-        self.grip = None           # (screen y where the drag started, extra then)
-        self.msgs.canvas.bind("<ButtonPress-1>", self.on_press)
-        self.msgs.canvas.bind("<B1-Motion>", self.on_drag)
-        self.msgs.canvas.bind("<ButtonRelease-1>", self.on_release)
-        self.drag = None
         self.dismissed = None      # the game chat's line count when the ⚠ was clicked away
         self.covered = False       # the game is drawing something over its chat: step aside
         self.fit_asked = 0.0
@@ -990,6 +1339,9 @@ class ChatPanel:
         self.settings = None
         self.settings_vars: dict = {}  # Settings window controls that change from elsewhere too
         self.set_fonts()
+        if not isinstance(opts.get("windows"), list):
+            opts["windows"] = []
+        self.windows = [ExtraChat(self, conf) for conf in opts["windows"]]
         CACHE_DIR.mkdir(exist_ok=True)
         self.chime = CACHE_DIR / f"whisper_{int(opts['volume'] * 100)}.wav"
         if not self.chime.exists():
@@ -1047,10 +1399,10 @@ class ChatPanel:
             self.pop_up(msg)
 
     def pop_up(self, msg: dict) -> None:
-        """A note just above the panel for 12 seconds; clicking it opens the Watch tab."""
+        """A note just above the panel (and its splits) for 12 seconds; clicking it opens the Watch tab."""
         if self.toast is not None:
             self.toast.root.destroy()
-        p = self.panel_now()
+        p = self.stack_now()
         w = max(300, min(560, p["width"] - 20))
         t = self.toast = self.overlay.Overlay("CustomClassic Chat watch", p["left"] + 10, 0, w, 10, master=self.root,
                                               click_through=False)
@@ -1103,38 +1455,132 @@ class ChatPanel:
 
     # placing ----------------------------------------------------------------
 
-    def place(self, r: dict) -> None:
-        """The whole panel inside r: the tab strip as its top line, the messages below it."""
-        sh = strip_height(self.line)
-        where = (r["left"], r["top"], r["width"], r["height"], sh)
-        if where == getattr(self, "_where", None):
-            return
-        self._where = where
-        self.strip.place(r["left"], r["top"], r["width"], sh)
-        self.msgs.place(r["left"], r["top"] + sh, r["width"], max(sh, r["height"] - sh))
-        self.render()
+    # what this window does as the main panel ---------------------------------
 
-    def panel_now(self) -> dict:
-        """The panel's rect as it sits on screen (tab strip and messages together)."""
-        return {"left": self.root.winfo_x(), "top": self.strip.root.winfo_y(), "width": self.msgs.width,
-                "height": self.strip.height + self.msgs.height}
+    @property
+    def see_through(self) -> bool:
+        return bool(self.opts["see_through"])
+
+    @property
+    def is_free(self) -> bool:
+        return bool(self.opts["unlocked"])
+
+    def tab_chosen(self, name: str) -> None:
+        self.opts["tab"] = name
+        save_settings(self.opts)
+
+    def keep(self, rect: dict) -> None:
+        self.opts["free"] = rect
+        save_settings(self.opts)
+
+    def dismiss_warning(self) -> None:
+        self.dismissed = chat_lines(self.read_rect, self.line)  # the ⚠ clicked: put away for this chat size
+
+    def grip_on_chat(self, e) -> None:
+        """The ≡ grip on the game's chat: the panel reaches higher than the game's chat, as the game's does."""
+        if self.read_rect and self.game:
+            y0, extra0, _ = self.grip
+            c = self.game["client"]
+            top_room = c["top"] + self.read_rect["top"]  # up to the top of the screen
+            self.opts["extra"] = max(0, min(top_room, extra0 + (y0 - e.y_root)))
+            read = {**self.read_rect, "left": c["left"] + self.read_rect["left"], "top": c["top"] + self.read_rect["top"]}
+            self.place(panel_rect(read, self.opts["extra"], self.bar_px))
 
     def free_rect(self) -> dict:
         """Where an unlocked panel sits: where it was put, or back in view if that's off every monitor."""
         free = self.opts["free"] or self.panel_now()
-        if not on_screen({**free, "height": strip_height(self.line)}):
-            area = self.game["client"] if self.game else {"left": 0, "top": 0, "width": self.root.winfo_screenwidth(),
-                                                          "height": self.root.winfo_screenheight()}
-            free = self.opts["free"] = rescued(free, area)
-            save_settings(self.opts)
-        return free
+        kept = self.keep_on_screen(free)
+        if kept != free:
+            self.keep(kept)
+        return kept
+
+    def render(self) -> None:
+        """This window and the extra ones (which follow the panel's settings for what they leave out)."""
+        views = [self, *self.windows]
+        shown = {v.log.tab for v in views}  # a tab open in one of them is in view: no dot for it elsewhere
+        for v in views:
+            for name in shown:
+                if name in v.log.unread:
+                    v.log.unread[name] = False
+        ChatView.render(self)
+        for w in self.windows:
+            w.log.hidden, w.log.hide_padded = self.log.hidden, self.log.hide_padded
+            w.render()
+
+    def apply_see_through(self) -> None:
+        ChatView.apply_see_through(self)
+        for w in self.windows:
+            ChatView.apply_see_through(w)
+
+    # extra chat windows -------------------------------------------------------
+
+    def add_window(self) -> None:
+        """A new chat window showing All, just above the panel, in adjust mode to be dragged where
+        it should go (even off the game window)."""
+        p = self.panel_now()
+        h = max(p["height"], round(self.line * 8))
+        conf = {"tab": "All", "see_through": False,
+                "free": {"left": p["left"] + 30, "top": max(0, p["top"] - h - 30), "width": p["width"], "height": h}}
+        self.opts["windows"].append(conf)
+        w = ExtraChat(self, conf)
+        self.windows.append(w)
+        w.place(w.keep_on_screen(conf["free"]))
+        w.set_edit(True)
+        save_settings(self.opts)
+        self.events.put(("status", "New chat window: drag it anywhere and its corner to resize, then press "
+                                   "Ctrl+Alt+F5 to keep it there. Its ✕ closes it."))
+        self.settings_changed()
+
+    def add_split(self) -> None:
+        """Split the chat: a pane with its own tab row on top of the panel, as wide as it and moving
+        with it (Mega to start with, so megaphones sit above the chat). Its ≡ grip sets its height."""
+        conf = {"dock": "above", "tab": "Mega", "see_through": False, "height": round(self.line * 5) + 20}
+        self.opts["windows"].append(conf)
+        w = ExtraChat(self, conf)
+        self.windows.append(w)
+        w.follow()
+        save_settings(self.opts)
+        self.settings_changed()
+
+    def placed(self) -> dict:
+        """Where the panel was last put (Windows reports a move a moment later)."""
+        if self._where:
+            left, top, width, height, _ = self._where
+            return {"left": left, "top": top, "width": width, "height": height}
+        return self.panel_now()
+
+    def place(self, r: dict) -> None:
+        ChatView.place(self, r)
+        for w in self.windows:  # splits move with it
+            if w.docked:
+                w.follow()
+
+    def stack_now(self) -> dict:
+        """The panel with its splits on top: where it all sits on screen."""
+        p = self.panel_now()
+        top = min([p["top"]] + [w.panel_now()["top"] for w in self.windows if w.docked])
+        return {**p, "top": top, "height": p["top"] + p["height"] - top}
+
+    def close_window(self, w: "ExtraChat") -> None:
+        self.windows.remove(w)
+        self.opts["windows"] = [c for c in self.opts["windows"] if c is not w.conf]
+        w.destroy()
+        save_settings(self.opts)
+        self.settings_changed()
+
+    def settings_changed(self) -> None:
+        """The settings window shows how many windows there are: tell it."""
+        if self.settings_vars.get("windows"):
+            self.settings_vars["windows"]()
 
     def follow(self) -> None:
-        """Keep the panel on the game's chat box (or where it was put, when unlocked), and show it
-        only while the game is in front."""
+        """Keep the panel on the game's chat box (or where it was put, when unlocked), the extra
+        windows where they were put, and show them all only while the game is in front."""
         unlocked = self.opts["unlocked"]
         if unlocked and not self.msgs.edit and not self.grip:
             self.place(self.free_rect())
+        for w in self.windows:
+            w.follow()
         if not self.demo:
             game = game_geometry()
             self.game = game
@@ -1152,23 +1598,15 @@ class ChatPanel:
                 if reason and not self.explained:
                     self.explained = True
                     self.explain(reason)
-            ours = {self.msgs.hwnd, self.strip.hwnd}
-            front = game and (foreground_root() in ({game["hwnd"]} | ours))
+            ours = set().union(self.hwnds, *(w.hwnds for w in self.windows))
+            front = bool(game) and foreground_root() in ({game["hwnd"]} | ours)
             # unlocked, it isn't over the game's chat: nothing there to step aside for
             visible = (bool((front or self.always_show) and (rect or unlocked)) and not self.user_hidden
                        and not (self.covered and not unlocked))
-            self.msgs.show(visible or self.msgs.edit)
-            self.strip.show(visible or self.msgs.edit)
+            self.show(visible)
+            for w in self.windows:  # a split goes with the panel; a window is never over the game's chat
+                w.show(visible if w.docked else (front or self.always_show) and not self.user_hidden)
         self.root.after(300, self.follow)
-
-    def apply_see_through(self) -> None:
-        """◐ on: the messages 90% see-through, and clicks go to the game's chat below. The tab
-        strip stays solid and clickable, so ◐ can always be clicked off again."""
-        on = bool(self.opts["see_through"]) and not self.msgs.edit
-        self.msgs.set_alpha(self.opts["peek_alpha"] if on else self.opts["opacity"])
-        self.strip.set_alpha(self.opts["opacity"])
-        self.msgs.through = on
-        self.msgs.click_through(on)
 
     def toggle_see_through(self) -> None:
         self.opts["see_through"] = not self.opts["see_through"]
@@ -1191,10 +1629,13 @@ class ChatPanel:
                     if data.get("padded") not in self.log.hide_padded:  # left out: no alerts either
                         self.watched(data)
                     self.log.add(data)
+                    for w in self.windows:
+                        w.log.notice(data)
                     if not self.demo:
                         save_message(HISTORY_FILE, data)
-                    if self.scroll and shows(self.log.kinds(), data):
-                        self.scroll_to(self.scroll + 1)  # reading history: keep the same lines in view
+                    for v in [self, *self.windows]:  # reading history: keep the same lines in view
+                        if v.scroll and shows(v.log.kinds(), data):
+                            v.scroll_to(v.scroll + 1)
                     changed = True
                     if data["kind"] == "whisper" and not data["to"] and self.opts["whisper_sound"]:
                         import winsound
@@ -1212,6 +1653,12 @@ class ChatPanel:
                     changed = True
                 elif kind == "unlock":
                     self.set_unlocked(not self.opts["unlocked"])
+                    changed = True
+                elif kind == "window":
+                    self.add_window()
+                    changed = True
+                elif kind == "split":
+                    self.add_split()
                     changed = True
                 elif kind == "settings":
                     self.open_settings()
@@ -1234,20 +1681,15 @@ class ChatPanel:
         self.root.after(100, self.pump)
 
     def on_hotkey(self, hk: int) -> None:
-        if hk == HK_EDIT:
-            locked = self.msgs.toggle_edit()
-            self.strip.edit = self.msgs.edit
-            self.apply_see_through()  # solid while adjusting
-            if locked and self.opts["unlocked"]:
-                self.opts["free"] = self.panel_now()
-                save_settings(self.opts)
-            elif locked and self.game:
-                c, p = self.game["client"], self.panel_now()
-                extra = max(0, min(self.opts["extra"], p["height"] - 2 * round(self.line)))
-                box = {"left": p["left"] - c["left"], "top": p["top"] - c["top"] + extra,
-                       "width": p["width"] - self.bar_px, "height": p["height"] - extra, "bar": self.bar_px}
-                self.opts["box"], self.opts["extra"] = to_relative(box, self.line, c), extra
-                save_settings(self.opts)
+        if hk == HK_EDIT:  # adjust every window; pressed again, each keeps where it was put
+            views = [self, *self.windows]
+            if any(v.msgs.edit for v in views):
+                for v in views:
+                    if v.set_edit(False):
+                        v.keep_adjusted()
+            else:
+                for v in views:
+                    v.set_edit(True)
         elif hk == HK_FIT:
             self.reset_position()
         elif hk == HK_HIDE:
@@ -1260,6 +1702,19 @@ class ChatPanel:
                 self.tray.stop()
             self.root.destroy()
 
+    def keep_adjusted(self) -> None:
+        """Adjusting ended: keep the panel where it was put (unlocked), or take it as the game's
+        chat box (on the chat)."""
+        if self.opts["unlocked"]:
+            self.keep(self.panel_now())
+        elif self.game:
+            c, p = self.game["client"], self.panel_now()
+            extra = max(0, min(self.opts["extra"], p["height"] - 2 * round(self.line)))
+            box = {"left": p["left"] - c["left"], "top": p["top"] - c["top"] + extra,
+                   "width": p["width"] - self.bar_px, "height": p["height"] - extra, "bar": self.bar_px}
+            self.opts["box"], self.opts["extra"] = to_relative(box, self.line, c), extra
+            save_settings(self.opts)
+
     def set_unlocked(self, on: bool) -> None:
         """Unlocked: the panel can go anywhere, even off the game window, and it starts in
         adjust mode to be dragged there. It still reads the game's own chat. Locked again, it
@@ -1269,14 +1724,11 @@ class ChatPanel:
         self.opts["unlocked"] = on
         if on:
             self.opts["free"] = self.opts["free"] or self.panel_now()
-            if not self.msgs.edit:
-                self.on_hotkey(HK_EDIT)
+            self.set_edit(True)
             self.events.put(("status", "Unlocked: drag the panel anywhere and its corner to resize, then press "
                                        "Ctrl+Alt+F5 to keep it there. Reset position puts it back on the game's chat."))
-        elif self.msgs.edit:
-            self.msgs.toggle_edit()  # leave adjusting without saving it as the game's chat box
-            self.strip.edit = False
-            self.apply_see_through()
+        else:
+            self.set_edit(False)  # leave adjusting without saving it as the game's chat box
         self._where = None
         save_settings(self.opts)
         if self.settings_vars:
@@ -1286,153 +1738,11 @@ class ChatPanel:
         """Back on the game's chat box, fitted again: for a panel put somewhere it can't be reached,
         or moved off the chat by accident."""
         self.set_unlocked(False)
-        if self.msgs.edit:
-            self.msgs.toggle_edit()
-            self.strip.edit = False
-            self.apply_see_through()
+        self.set_edit(False)
         self.opts["extra"], self.opts["free"], self.user_hidden = 0, None, False
         self.want_fit = True
         self._where = None
         save_settings(self.opts)
-
-    def tab_spans(self) -> list[tuple[str, int, int]]:
-        x, out, pad = strip_height(self.line) + 6, [], 10  # after the ≡ grip
-        for name, _ in self.log.tabs:
-            w = self.tab_font.measure(name) + 2 * pad
-            out.append((name, x, x + w))
-            x += w + 3
-        return out
-
-    def on_strip_click(self, e) -> None:
-        if e.x < strip_height(self.line) + 4:  # the ≡ grip: drag up or down to resize, like the game's chat
-            self.grip = (e.y_root, self.opts["extra"], self.panel_now())
-            return
-        sh = strip_height(self.line)
-        if e.x >= self.strip.width - sh - 4:
-            self.toggle_see_through()
-        elif e.x >= self.strip.width - 2 * sh - 8 and self.warning():
-            self.dismissed = chat_lines(self.read_rect, self.line)  # the ⚠ clicked: put away for this chat size
-        for name, x0, x1 in self.tab_spans():
-            if x0 <= e.x < x1:
-                self.log.select(name)
-                self.opts["tab"], self.scroll = name, 0
-                save_settings(self.opts)
-        self.render()
-
-    def on_grip_drag(self, e) -> None:
-        if self.grip and self.opts["unlocked"]:
-            y0, _, p = self.grip
-            bottom = p["top"] + p["height"]
-            h = max(2 * round(self.line) + strip_height(self.line), p["height"] + (y0 - e.y_root))
-            self.place({**p, "top": bottom - h, "height": h})
-        elif self.grip and self.read_rect and self.game:
-            y0, extra0, _ = self.grip
-            c = self.game["client"]
-            top_room = c["top"] + self.read_rect["top"]  # up to the top of the screen
-            self.opts["extra"] = max(0, min(top_room, extra0 + (y0 - e.y_root)))
-            read = {**self.read_rect, "left": c["left"] + self.read_rect["left"], "top": c["top"] + self.read_rect["top"]}
-            self.place(panel_rect(read, self.opts["extra"], self.bar_px))
-
-    def on_grip_release(self, e) -> None:
-        if self.grip:
-            self.grip = None
-            if self.opts["unlocked"]:
-                self.opts["free"] = self.panel_now()
-            save_settings(self.opts)
-
-    # scrolling, like the game's chat ---------------------------------------
-
-    def scroll_to(self, scroll: int) -> None:
-        most = max(0, len(self.log.visible()) - max(1, self.in_view))
-        self.scroll = max(0, min(most, scroll))
-
-    def on_wheel(self, e) -> None:
-        self.scroll_to(self.scroll + max(1, abs(e.delta) // 120) * (1 if e.delta > 0 else -1))
-        self.render()
-
-    def bar_hit(self, y: int) -> str:
-        """Which part of the scrollbar is at height y: up, down, thumb, page_up or page_down."""
-        b, h = self.bar_px, self.msgs.height
-        if y < b:
-            return "up"
-        if y >= h - b:
-            return "down"
-        top, size = thumb(len(self.log.visible()), self.in_view, self.scroll, h, b)
-        return "thumb" if top <= y < top + size else ("page_up" if y < top else "page_down")
-
-    def step(self, part: str) -> None:
-        """One step of a held arrow or track click; repeats while the button is held, like the game's."""
-        n = {"up": 1, "down": -1, "page_up": max(1, self.in_view - 1), "page_down": -max(1, self.in_view - 1)}[part]
-        self.scroll_to(self.scroll + n)
-        self.render()
-        self.repeat_id = self.root.after(350 if self.repeat_id is None else 70, self.step, part)
-
-    def on_press(self, e) -> None:
-        if self.msgs.edit:
-            near_corner = e.x > self.msgs.width - 16 and e.y > self.msgs.height - 16
-            p = self.panel_now()
-            self.drag = ("size" if near_corner else "move", e.x_root, e.y_root, p["left"], p["top"], p["width"],
-                         p["height"])
-            return
-        if e.x >= self.msgs.width - self.bar_px:
-            part = self.bar_hit(e.y)
-            if part == "thumb":
-                top, _ = thumb(len(self.log.visible()), self.in_view, self.scroll, self.msgs.height,
-                               self.bar_px)
-                self.bar = ("thumb", e.y - top)
-            else:
-                self.bar, self.repeat_id = ("repeat", part), None
-                self.step(part)
-
-    def on_release(self, e) -> None:
-        if self.repeat_id is not None:
-            self.root.after_cancel(self.repeat_id)
-        self.bar, self.repeat_id, self.drag = None, None, None
-
-    def on_drag(self, e) -> None:
-        if self.bar and self.bar[0] == "thumb":
-            b, total = self.bar_px, len(self.log.visible())
-            _, size = thumb(total, self.in_view, self.scroll, self.msgs.height, b)
-            self.scroll_to(scroll_at(e.y - self.bar[1], total, self.in_view, self.msgs.height, b, size))
-            self.render()
-            return
-        if not (self.msgs.edit and self.drag):
-            return
-        mode, x0, y0, left, top, w, h = self.drag
-        dx, dy = e.x_root - x0, e.y_root - y0
-        if mode == "move":
-            self.place({"left": left + dx, "top": top + dy, "width": w, "height": h})
-        else:
-            self.place({"left": left, "top": top, "width": max(200, w + dx), "height": max(2 * round(self.line), h + dy)})
-
-    # drawing ----------------------------------------------------------------
-
-    def render(self) -> None:
-        self.render_strip()
-        self.render_messages()
-
-    def render_strip(self) -> None:
-        c, h = self.strip.canvas, self.strip.height
-        c.delete("all")
-        g = h - 4  # the ≡ grip
-        c.create_rectangle(4, 2, 4 + g, h - 2, fill=TAB, outline="")
-        for i in (-1, 0, 1):
-            y = h // 2 + 1 + i * max(3, h // 6)
-            c.create_line(8, y, g, y, fill=SOFT, width=2)
-        for name, x0, x1 in self.tab_spans():
-            on = name == self.log.tab
-            c.create_rectangle(x0, 2, x1, h, fill=TAB_ON if on else TAB, outline="")
-            c.create_text((x0 + x1) // 2, h // 2 + 1, text=name, fill=INK if on else SOFT, font=self.tab_font)
-            if self.log.unread.get(name):
-                r = max(3, h // 6)
-                c.create_oval(x1 - 2 * r - 2, 3, x1 - 2, 3 + 2 * r, fill=GOLD if name == "Watch" else DOT, outline="")
-        s = h - 4
-        x = self.strip.width - s - 4
-        c.create_rectangle(x, 2, x + s, h - 2, fill=TAB_ON if self.opts["see_through"] else TAB, outline="")
-        c.create_text(x + s // 2, h // 2 + 1, text="◐", fill=INK if self.opts["see_through"] else SOFT,
-                      font=self.tab_font)
-        if self.warning():  # quiet: an amber mark, explained once a session; a click puts it away
-            c.create_text(x - 4 - s // 2, h // 2 + 1, text="⚠", fill=WARN, font=self.tab_font)
 
     # settings -----------------------------------------------------------------
 
@@ -1456,17 +1766,18 @@ class ChatPanel:
             return
         if key == "panel_bg":
             self.opts["panel_bg"] = chosen
-            for w in (self.msgs, self.strip):
-                w.canvas.configure(bg=chosen)
+            for v in [self, *self.windows]:
+                for w in (v.msgs, v.strip):
+                    w.canvas.configure(bg=chosen)
         else:
             self.opts["colors"] = {**self.opts["colors"], key: chosen}
         self.set_opt(key if key == "panel_bg" else "colors", self.opts[key if key == "panel_bg" else "colors"])
 
     def reset_colours(self) -> None:
         self.opts["colors"], self.opts["panel_bg"] = {}, None
-        for w in (self.msgs, self.strip):
-            w.canvas.configure(bg=PANEL)
-        self.strip.canvas.configure(bg=STRIP)
+        for v in [self, *self.windows]:
+            v.msgs.canvas.configure(bg=PANEL)
+            v.strip.canvas.configure(bg=STRIP)
         save_settings(self.opts)
         self.render()
 
@@ -1491,6 +1802,9 @@ class ChatPanel:
         old, new = rename
         self.log.set_tabs(self.tabs(), new if old and self.log.tab == old else None)
         self.opts["tab"] = self.log.tab
+        for w in self.windows:
+            w.log.set_tabs(self.tabs(), new if old and w.log.tab == old else None)
+            w.conf["tab"] = w.log.tab
 
     def twitch_channel(self) -> str | None:
         """The Twitch channel to read: only when opted in and a channel is set."""
@@ -1524,55 +1838,6 @@ class ChatPanel:
         self.scroll = 0
         save_settings(self.opts)
         self.render()
-
-    def render_messages(self) -> None:
-        c, w, h = self.msgs.canvas, self.msgs.width, self.msgs.height
-        c.delete("all")
-        b, pad = self.bar_px, 6
-        shown = self.log.visible()
-        end = len(shown) - self.scroll
-        y, fits = h - 2, 0
-        for m in reversed(shown[:max(0, end)]):
-            star = "★ " if m.get("watch") and self.log.tab != "Watch" else ""
-            t = c.create_text(pad, 0, anchor="nw", text=star + line_text(m, self.opts["timestamps"]),
-                              fill=self.opts["colors"].get(m["kind"]) or m.get("fg") or COLORS[m["kind"]],
-                              font=self.font, width=w - 2 * pad - b)
-            th = c.bbox(t)[3]
-            c.move(t, 0, y - th)
-            if m.get("bg"):  # a megaphone's band, as the game draws it
-                band = c.create_rectangle(0, y - th, w - b - 1, y, fill=m["bg"], outline="")
-                c.tag_lower(band)
-            if m.get("watch"):  # caught by the watch list: a gold edge
-                c.create_rectangle(0, y - th, 2, y - 1, fill=GOLD, outline="")
-            y -= th
-            if y < 0:
-                break
-            fits += 1
-        self.in_view = max(1, fits)
-        self.render_scrollbar(c, w, h, b, len(shown))
-
-    def render_scrollbar(self, c, w: int, h: int, b: int, total: int) -> None:
-        """The game's scrollbar, lying over the game's own: a dark divider, a light track, arrow
-        buttons at both ends and a thumb to drag."""
-        divider = max(1, round(b / 6))
-        c.create_rectangle(w - b, 0, w - b + divider - 1, h - 1, fill="#1a1f2a", outline="")
-        x0, b = w - b + divider, b - divider  # the track: arrows and thumb are as wide as it
-        c.create_rectangle(x0, 0, w - 1, h - 1, fill=SB_TRACK, outline=SB_EDGE)
-        for y0, up in ((0, True), (h - b, False)):
-            c.create_rectangle(x0, y0, w - 1, y0 + b - 1, fill=SB_BUTTON, outline=SB_EDGE)
-            m, a = x0 + b / 2, b * 0.28
-            pts = (m - a, y0 + b * 0.62, m + a, y0 + b * 0.62, m, y0 + b * 0.36) if up else \
-                (m - a, y0 + b * 0.38, m + a, y0 + b * 0.38, m, y0 + b * 0.64)
-            c.create_polygon(*pts, fill=SB_ARROW, outline="")
-        top, size = thumb(total, self.in_view, self.scroll, h, b)
-        if total > self.in_view:
-            c.create_rectangle(x0 + 2, top, w - 3, top + size - 1, fill=SB_THUMB, outline=SB_EDGE)
-        if self.msgs.edit:
-            c.create_rectangle(1, 1, w - 2, h - 2, outline="#9db1d3", dash=(4, 3))
-            c.create_rectangle(w - 14, h - 14, w - 2, h - 2, fill="#9db1d3", outline="")
-            c.create_text(w // 2, h // 2, text="Drag to move, corner to resize. Ctrl+Alt+F5 saves.", fill=INK,
-                          font=self.tab_font)
-
 
 def print_replay(paths: list[Path]) -> None:
     """What each saved screenshot's chat lines become: their kind and the tabs that show them."""

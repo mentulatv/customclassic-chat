@@ -26,6 +26,8 @@ chat stay readable; megaphones get their own tab instead of flooding everything 
 - **Watch list:** a chime and a pop-up when a megaphone mentions something you're after
   ("mushmom", "Work Gloves"). It can also check that someone is selling, and that the price
   is within a range you set.
+- **Split the chat and add windows:** a second pane on top of the chat with its own tabs
+  (Mega above, All below), or extra chat windows anywhere on screen, even outside the game.
 - **See-through toggle (◐):** the messages turn 90% see-through and clicks go to the game's
   own chat underneath, until you click ◐ again.
 - **Leaves the scenery out:** the game's chat box is see-through, so monster name tags,
@@ -86,7 +88,18 @@ python.exe to PATH"), download this repository, double-click **`setup.bat`** onc
 wheel. New messages don't pull you down while you're reading back.
 
 **Tray icon:** left click shows or hides the panel. Right click: Show / hide, Adjust
-position, Unlocked (place it anywhere), Reset position, See-through, Settings…, Quit.
+position, Unlocked (place it anywhere), Reset position, Split the chat, New chat window,
+See-through, Settings…, Quit.
+
+**Split the chat:** tray menu or Settings → Tabs → **Split the chat**. A second pane appears on
+top of the chat, as wide as it and moving with it, with its own row of tabs: Mega to start with,
+so megaphones sit above and your chat below. Drag its ≡ to make it taller, click its ✕ to close
+it. A tab open in one pane gets no unread dot in the other.
+
+**More chat windows:** tray menu or Settings → Position → **Add a chat window**. Each window
+has its own tab and ◐, and goes anywhere you drag it: next to the game, on another screen. It
+starts in adjust mode; press Ctrl+Alt+F5 to keep it where it is (Ctrl+Alt+F5 later moves all
+windows again). Click its ✕ to close it. Windows and splits are remembered between restarts.
 
 **Somewhere else entirely:** tick **Unlocked** (tray menu or Settings → Position) and drag the
 panel anywhere, even off the game window or onto another monitor; drag its corner to resize,
