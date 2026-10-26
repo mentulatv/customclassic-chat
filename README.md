@@ -31,11 +31,13 @@ chat stay readable; megaphones get their own tab instead of flooding everything 
 
 Windows 10/11 only. The game has to run **windowed** or **borderless**.
 
-> **Read this first.** Maple Chat is a third-party program that reads the game's screen.
-> Nexon's terms of service don't allow third-party programs, and using it is **at your own
-> risk**: your account could be banned. Maple Chat only looks at pixels of the game window.
-> It never opens the game's process, never reads game memory, files or network traffic, and
-> never sends any input to the game.
+> **Disclaimer.** Maple Chat is third-party software, not made or endorsed by Nexon. It
+> interacts with the game only in the way considered safe for such tools: it **reads what's
+> on screen** with text recognition (OCR), much like a screen recorder or streaming software
+> sees the game. It never opens the game's process, never reads or changes game memory or
+> files, never touches the game's network traffic, and never sends any input to the game.
+> Even so, Nexon's terms don't allow third-party programs, so no tool can promise your
+> account is safe: **use it at your own risk.**
 
 ---
 
