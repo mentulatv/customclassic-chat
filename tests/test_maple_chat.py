@@ -347,3 +347,13 @@ def test_lines_read_before_a_restart_are_not_new_again():
     d = mc.Dedupe()  # restarted: seeded from the kept history
     d.seed(first, 1100.0)
     assert mc.messages_from([line("[18:50] Nimbi<< like 14", "whisper")], d, 1100.0) == []
+
+
+def test_wrapped_rows_join_where_the_game_broke_them():
+    from reader import join_wrapped
+    assert join_wrapped("removed the gender-exclusivity for acc", "ounts") == "removed the gender-exclusivity for accounts"
+    assert join_wrapped("Aurora Mystery Fashion C", "rate! Congrats!") == "Aurora Mystery Fashion Crate! Congrats!"
+    assert join_wrapped("S>This and Earings6", "0%") == "S>This and Earings60%"
+    assert join_wrapped("MSCW 10", "% OFF") == "MSCW 10% OFF"
+    assert join_wrapped("I'm on it.", "see you") == "I'm on it. see you"
+    assert join_wrapped("meet me at", "Henesys") == "meet me at Henesys"

@@ -244,6 +244,18 @@ def _close(a, b, limit: int = 90) -> bool:
 
 
 
+def join_wrapped(head: str, tail: str) -> str:
+    """A message and its wrapped row as one. The game wraps by the letter, mid-word ("Fashion C" /
+    "rate!", "acc" / "ounts"), so the two join without a space, except after the end of a
+    sentence or a closing bracket, and where a small letter meets a capital ("meet at" / "Henesys")."""
+    a, b = head.rstrip(), tail.lstrip()
+    if not a or not b:
+        return a + b
+    if a[-1] in ".,!?:;)]" or b[0] in "([" or (a[-1].islower() and b[0].isupper()):
+        return f"{a} {b}"
+    return a + b
+
+
 def merge_wrapped(lines: list[Line], region_height: int, width: int | None = None) -> list[Line]:
     """Join a wrapped line to the message above it. A line that neither starts a message
     nor continues the one above is the tail of a message that scrolled out of the box
@@ -262,7 +274,7 @@ def merge_wrapped(lines: list[Line], region_height: int, width: int | None = Non
                 and (not width or prev.right >= width * 0.7)
                 and _close(prev.color, ln.color)
                 and (not (prev.band and ln.band) or _close(prev.bg, ln.bg))):
-            prev.text = f"{prev.text} {ln.text}"
+            prev.text = join_wrapped(prev.text, ln.text)
             prev.bottom = ln.bottom
             if width:  # where its last row ends: whether that one wrapped too
                 prev.right = ln.right
