@@ -151,7 +151,9 @@ asked for; the game's process is never opened.
 
 | File | |
 |---|---|
-| `maple_chat.py` | the panel, tabs, settings and the reading loop |
+| `maple_chat.py` | the panel, tabs and the reading loop |
+| `settings_ui.py` | the settings window |
+| `twitch_chat.py` | Twitch chat, read as a guest |
 | `reader.py` | text recognition and chat colours |
 | `watch.py` | the watch list |
 | `trade_parser.py`, `data/` | reads prices in megaphones (from the Maple Price Index) |

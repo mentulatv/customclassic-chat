@@ -69,6 +69,7 @@ DEFAULTS = {
     "twitch_channel": "",     # which channel
     "twitch_in_all": False,   # its chat in All too
     "tab": "All",
+    "settings_page": "Appearance",  # the settings section open last
     "box": None,              # the chat lines relative to the game window: dx, dy (from its bottom), w, h, line, cw, ch
     "extra": 0,               # pixels the panel reaches above the game's chat (dragged with the ≡ grip)
     "unlocked": False,        # placed anywhere you like instead of on the game's chat (it still reads the game's chat)
@@ -1459,159 +1460,17 @@ class ChatPanel:
         save_settings(self.opts)
         self.render()
 
+    def icon_path(self) -> Path:
+        return save_icon(CACHE_DIR / "maple_chat.ico")
+
     def open_settings(self) -> None:
-        """The settings window, in two columns: how the panel looks on the left, what it shows on
-        the right. Changes apply as you make them."""
-        import tkinter as tk
+        """The settings window (settings_ui.py); a second open brings the first to the front."""
+        import settings_ui
         if self.settings is not None and self.settings.winfo_exists():
             self.settings.deiconify()
             self.settings.lift()
             return
-        top = self.settings = tk.Toplevel(self.root)
-        top.title("Maple Chat settings")
-        top.configure(bg=PANEL, padx=18, pady=14)
-        top.resizable(False, False)
-        top.attributes("-topmost", True)
-        try:
-            top.iconbitmap(str(save_icon(CACHE_DIR / "maple_chat.ico")))
-        except Exception:
-            pass
-        cols = tk.Frame(top, bg=PANEL)
-        cols.pack(fill="both")
-        win = tk.Frame(cols, bg=PANEL)  # the left column
-        win.pack(side="left", anchor="n", padx=(0, 28))
-        look = {"bg": PANEL, "fg": INK, "font": (FONT, 10)}
-        slider = {"orient": "horizontal", "length": 320, "bg": PANEL, "fg": INK, "troughcolor": TAB,
-                  "highlightthickness": 0, "activebackground": TAB_ON, "font": (FONT, 9)}
-
-        size = tk.IntVar(value=self.opts["font_px"] or self.auto_px())
-        tk.Label(win, text="Text size (pixels)", anchor="w", **look).pack(fill="x")
-        tk.Scale(win, from_=9, to=32, variable=size, command=lambda v: self.set_text_size(int(float(v))),
-                 **slider).pack(fill="x")
-        tk.Button(win, text="Match the game's text", font=(FONT, 9),
-                  command=lambda: (self.set_text_size(None), size.set(self.auto_px()))).pack(anchor="w", pady=(2, 12))
-
-        see = tk.IntVar(value=round((1 - self.opts["peek_alpha"]) * 100))
-
-        def set_see(v):
-            self.opts["peek_alpha"] = round(1 - int(float(v)) / 100, 2)
-            save_settings(self.opts)
-            self.apply_see_through()
-        tk.Label(win, text="How see-through ◐ makes it (%)", anchor="w", **look).pack(fill="x")
-        tk.Scale(win, from_=50, to=95, variable=see, command=set_see, **slider).pack(fill="x")
-
-        opacity = tk.IntVar(value=round(self.opts["opacity"] * 100))
-
-        def set_opacity(v):
-            self.opts["opacity"] = round(int(float(v)) / 100, 2)
-            save_settings(self.opts)
-            self.apply_see_through()
-        tk.Label(win, text="Panel opacity (%)", anchor="w", **look).pack(fill="x", pady=(12, 0))
-        tk.Scale(win, from_=30, to=100, variable=opacity, command=set_opacity, **slider).pack(fill="x")
-
-        # where it sits: on the game's chat, or anywhere (it reads the game's chat either way)
-        tk.Label(win, text="Position", anchor="w", **look).pack(fill="x", pady=(12, 0))
-        row = tk.Frame(win, bg=PANEL)
-        row.pack(fill="x")
-        unlocked = self.settings_vars["unlocked"] = tk.BooleanVar(value=self.opts["unlocked"])
-        tk.Checkbutton(row, text="Unlocked: place it anywhere, even off the game", variable=unlocked,
-                       command=lambda: self.set_unlocked(unlocked.get()), selectcolor=TAB, activebackground=PANEL,
-                       activeforeground=INK, **look).pack(side="left")
-        tk.Button(row, text="Reset position", font=(FONT, 9),
-                  command=lambda: (self.reset_position(), unlocked.set(False))).pack(side="right")
-
-        # time stamps: Maple Chat's own clock, so they're there even when the game shows none
-        tk.Label(win, text="Time stamps", anchor="w", **look).pack(fill="x", pady=(12, 0))
-        stamps = tk.StringVar(value=self.opts["timestamps"])
-        row = tk.Frame(win, bg=PANEL)
-        row.pack(anchor="w")
-        for value, text in (("seconds", "18:16:05"), ("minutes", "18:16"), ("off", "Off")):
-            tk.Radiobutton(row, text=text, value=value, variable=stamps, selectcolor=TAB, activebackground=PANEL,
-                           activeforeground=INK, command=lambda: self.set_opt("timestamps", stamps.get()),
-                           **look).pack(side="left", padx=(0, 10))
-
-        # how long the chat is kept between restarts
-        tk.Label(win, text="Keep chat history for (hours)", anchor="w", **look).pack(fill="x", pady=(12, 0))
-        row = tk.Frame(win, bg=PANEL)
-        row.pack(anchor="w")
-        hours = tk.StringVar(value=str(self.opts["keep_hours"] or 12))
-        forever = tk.BooleanVar(value=not self.opts["keep_hours"])
-
-        def set_keep(*_):
-            try:
-                h = max(1, int(float(hours.get())))
-            except ValueError:
-                return
-            self.set_opt("keep_hours", 0 if forever.get() else h)
-        tk.Spinbox(row, from_=1, to=720, width=5, textvariable=hours, command=set_keep, font=(FONT, 10)).pack(side="left")
-        hours.trace_add("write", set_keep)
-        tk.Checkbutton(row, text="Forever", variable=forever, command=set_keep, selectcolor=TAB, activebackground=PANEL,
-                       activeforeground=INK, **look).pack(side="left", padx=10)
-
-        # colours: the background and the text of each chat type (empty: the game's own)
-        tk.Label(win, text="Colours", anchor="w", **look).pack(fill="x", pady=(12, 0))
-        row = tk.Frame(win, bg=PANEL)
-        row.pack(anchor="w")
-        for key, label in (("panel_bg", "Background"), ("map", "Map"), ("whisper", "Whisper"), ("party", "Party"),
-                           ("buddy", "Buddy"), ("system", "System"), ("mega", "Mega")):
-            tk.Button(row, text=label, font=(FONT, 9), command=lambda k=key: self.pick_colour(k)).pack(side="left", padx=1)
-        tk.Button(win, text="Reset to default colours", font=(FONT, 9), command=self.reset_colours).pack(anchor="w", pady=(4, 0))
-
-        win = tk.Frame(cols, bg=PANEL)  # the right column
-        win.pack(side="left", anchor="n")
-
-        # your characters' name tags show through the chat box when they walk behind it
-        tk.Label(win, text="Your character names, comma separated\n(their name tags behind the chat aren't chat)",
-                 anchor="w", justify="left", **look).pack(fill="x")
-        names = tk.StringVar(value=", ".join(self.opts["ignore_names"]))
-
-        def set_names(*_):
-            self.opts["ignore_names"] = [n.strip() for n in names.get().split(",") if n.strip()]
-            save_settings(self.opts)
-        tk.Entry(win, textvariable=names, width=44, font=(FONT, 10)).pack(anchor="w")
-        names.trace_add("write", set_names)
-
-        system = tk.BooleanVar(value=self.opts["system_messages"])
-
-        def set_system():
-            self.opts["system_messages"] = system.get()
-            self.log.hidden = set() if system.get() else {"system"}
-            self.scroll = 0
-            self.set_opt("system_messages", system.get())
-        tk.Checkbutton(win, text="Show the game's system messages (out of MP, shop closed, play time…)",
-                       variable=system, command=set_system, selectcolor=TAB, activebackground=PANEL,
-                       activeforeground=INK, **look).pack(anchor="w", pady=(12, 0))
-        tk.Label(win, text="Leave out lines padded with spacers to fill the chat (@@@@@@):", anchor="w",
-                 **look).pack(fill="x")
-        row = tk.Frame(win, bg=PANEL)
-        row.pack(anchor="w")
-        spacers = {k: tk.BooleanVar(value=k in (self.opts["hide_padded"] or [])) for k, _ in PADDED_KINDS}
-
-        def set_spacers():
-            chosen = [k for k, _ in PADDED_KINDS if spacers[k].get()]
-            self.log.hide_padded = set(chosen)
-            self.scroll = 0
-            self.set_opt("hide_padded", chosen)
-        for k, label in PADDED_KINDS:
-            tk.Checkbutton(row, text=label, variable=spacers[k], command=set_spacers, selectcolor=TAB,
-                           activebackground=PANEL, activeforeground=INK, **look).pack(side="left", padx=(0, 10))
-
-        sound = tk.BooleanVar(value=self.opts["whisper_sound"])
-
-        def set_sound():
-            self.opts["whisper_sound"] = sound.get()
-            save_settings(self.opts)
-        tk.Checkbutton(win, text="Chime when a whisper arrives", variable=sound, command=set_sound, selectcolor=TAB,
-                       activebackground=PANEL, activeforeground=INK, **look).pack(anchor="w", pady=(12, 0))
-        self.custom_tab_settings(win, look)
-        self.twitch_settings(win, look)
-        self.watch_settings(win, look)
-        tk.Button(top, text="Close", font=(FONT, 9), command=top.destroy).pack(anchor="e", pady=(14, 0))
-        top.update_idletasks()  # above the panel, kept on the screen
-        sw, sh = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
-        x = max(0, min(self.root.winfo_x() + 20, sw - top.winfo_width() - 10))
-        y = max(0, min(self.strip.root.winfo_y() - top.winfo_height() - 20, sh - top.winfo_height() - 60))
-        top.geometry(f"+{x}+{y}")
+        self.settings = settings_ui.SettingsWindow(self).top
 
     def tabs(self) -> list:
         o = self.opts
@@ -1648,38 +1507,6 @@ class ChatPanel:
         save_settings(self.opts)
         self.render()
 
-    def twitch_settings(self, win, look: dict) -> None:
-        """Twitch chat, opted into here: a channel's chat in its own tab, and in All too if wanted."""
-        import tkinter as tk
-        check = {"selectcolor": TAB, "activebackground": PANEL, "activeforeground": INK, **look}
-        on = tk.BooleanVar(value=self.opts["twitch_on"])
-        channel = tk.StringVar(value=self.opts["twitch_channel"])
-        in_all = tk.BooleanVar(value=self.opts["twitch_in_all"])
-        note = tk.Label(win, anchor="w", bg=PANEL, fg=SOFT, font=(FONT, 9))
-
-        def use(*_):
-            name = twitch_chat.channel_name(channel.get())
-            if channel.get().strip() and not name:
-                note.configure(text="That isn't a Twitch channel name (letters, numbers and _).", fg=WARN)
-                return
-            if on.get() and not name:
-                note.configure(text="Type the channel's name, then press Use.", fg=WARN)
-            channel.set(name)
-            self.set_twitch(on.get(), name, in_all.get())
-            if self.twitch_channel():
-                note.configure(text=f"Reading #{name}'s chat as a guest: no login needed.", fg=SOFT)
-            elif not on.get():
-                note.configure(text="Off.", fg=SOFT)
-        row = tk.Frame(win, bg=PANEL)
-        row.pack(fill="x", pady=(14, 0))
-        tk.Checkbutton(row, text="Twitch chat from the channel", variable=on, command=use, **check).pack(side="left")
-        field = tk.Entry(row, textvariable=channel, width=16, font=(FONT, 10))
-        field.pack(side="left", padx=4)
-        tk.Button(row, text="Use", font=(FONT, 9), width=5, command=use).pack(side="left")
-        field.bind("<Return>", use)
-        tk.Checkbutton(win, text="Show it in All too", variable=in_all, command=use, **check).pack(anchor="w")
-        note.pack(fill="x")
-
     def set_custom_tab(self, custom: dict) -> None:
         old = custom_name(self.opts["custom_tab"])
         self.opts["custom_tab"] = custom
@@ -1687,176 +1514,6 @@ class ChatPanel:
         self.scroll = 0
         save_settings(self.opts)
         self.render()
-
-    def custom_tab_settings(self, win, look: dict) -> None:
-        """A tab of your own: its name and the chat types it shows."""
-        import tkinter as tk
-        check = {"selectcolor": TAB, "activebackground": PANEL, "activeforeground": INK, **look}
-        custom = {"on": False, "name": "Custom", "kinds": [], **(self.opts["custom_tab"] or {})}
-        on = tk.BooleanVar(value=custom["on"])
-        name = tk.StringVar(value=custom["name"])
-        picked = {k: tk.BooleanVar(value=k in custom["kinds"]) for k, _ in CUSTOM_KINDS}
-
-        def changed(*_):
-            self.set_custom_tab({"on": on.get(), "name": name.get().strip()[:12] or "Custom",
-                                 "kinds": [k for k, _ in CUSTOM_KINDS if picked[k].get()]})
-        row = tk.Frame(win, bg=PANEL)
-        row.pack(fill="x", pady=(14, 0))
-        tk.Checkbutton(row, text="A tab of my own, named", variable=on, command=changed, **check).pack(side="left")
-        tk.Entry(row, textvariable=name, width=13, font=(FONT, 10)).pack(side="left", padx=4)
-        name.trace_add("write", changed)
-        tk.Label(win, text="It shows:", anchor="w", bg=PANEL, fg=SOFT, font=(FONT, 9)).pack(fill="x")
-        grid = tk.Frame(win, bg=PANEL)
-        grid.pack(anchor="w")
-        for i, (k, label) in enumerate(CUSTOM_KINDS):
-            tk.Checkbutton(grid, text=label, variable=picked[k], command=changed, **check).grid(
-                row=i // 3, column=i % 3, sticky="w", padx=(0, 10))
-
-    def watch_settings(self, win, look: dict) -> None:
-        """The watch list: what to look out for, and how to be told."""
-        import tkinter as tk
-        check = {"selectcolor": TAB, "activebackground": PANEL, "activeforeground": INK, **look}
-        tk.Label(win, text="Watch list: tell me when a megaphone mentions…", anchor="w", **look).pack(fill="x", pady=(14, 0))
-        row = tk.Frame(win, bg=PANEL)
-        row.pack(fill="x")
-        box = tk.Listbox(row, height=5, width=40, bg=TAB, fg=INK, selectbackground=TAB_ON, highlightthickness=0,
-                         font=(FONT, 9), activestyle="none")
-        box.pack(side="left", fill="x", expand=True)
-
-        def refresh():
-            box.delete(0, "end")
-            for e in self.watcher.entries:
-                box.insert("end", ("★ " if e.on else "   (off) ") + e.label())
-
-        def chosen():
-            sel = box.curselection()
-            return sel[0] if sel else None
-
-        def edit(i=None):
-            self.edit_watch_entry(i, refresh)
-
-        def remove():
-            i = chosen()
-            if i is not None:
-                self.save_watch([e for k, e in enumerate(self.watcher.entries) if k != i])
-                refresh()
-
-        def toggle():
-            i = chosen()
-            if i is not None:
-                self.watcher.entries[i].on = not self.watcher.entries[i].on
-                self.save_watch(self.watcher.entries)
-                refresh()
-                box.selection_set(i)
-        buttons = tk.Frame(row, bg=PANEL)
-        buttons.pack(side="left", padx=(6, 0), anchor="n")
-        for text, cmd in (("Add…", edit), ("Edit…", lambda: chosen() is not None and edit(chosen())),
-                          ("Remove", remove), ("On / off", toggle)):
-            tk.Button(buttons, text=text, font=(FONT, 9), width=8, command=cmd).pack(pady=1)
-        box.bind("<Double-Button-1>", lambda e: chosen() is not None and edit(chosen()))
-        refresh()
-
-        for key, text in (("watch_map", "Also look in map chat"), ("watch_sound", "Chime when it finds one"),
-                          ("watch_popup", "Pop up a note by the chat")):
-            var = tk.BooleanVar(value=self.opts[key])
-
-            def set_flag(k=key, v=var):
-                self.opts[k] = v.get()
-                save_settings(self.opts)
-                self.watcher.kinds = set(self.watch_kinds())
-            tk.Checkbutton(win, text=text, variable=var, command=set_flag, **check).pack(anchor="w")
-
-    def edit_watch_entry(self, index: int | None, done) -> None:
-        """Add or change one watch-list entry: a word or an item (names suggested from the price
-        site's catalog), and the conditions for items."""
-        import tkinter as tk
-        w = self.watch
-        old = self.watcher.entries[index] if index is not None else w.Entry("")
-        dlg = tk.Toplevel(self.settings or self.root)
-        dlg.title("Watch for…")
-        dlg.configure(bg=PANEL, padx=16, pady=12)
-        dlg.resizable(False, False)
-        dlg.attributes("-topmost", True)
-        dlg.transient(self.settings or self.root)
-        look = {"bg": PANEL, "fg": INK, "font": (FONT, 10)}
-        check = {"selectcolor": TAB, "activebackground": PANEL, "activeforeground": INK, **look}
-
-        tk.Label(dlg, text="A word or an item name", anchor="w", **look).pack(fill="x")
-        text = tk.StringVar(value=old.text)
-        field = tk.Entry(dlg, textvariable=text, width=42, font=(FONT, 10))
-        field.pack(fill="x")
-        hints = tk.Listbox(dlg, height=5, bg=TAB, fg=INK, selectbackground=TAB_ON, highlightthickness=0,
-                           font=(FONT, 9), activestyle="none")
-        hints.pack(fill="x")
-        known = tk.Label(dlg, anchor="w", justify="left", bg=PANEL, fg=SOFT, font=(FONT, 9), wraplength=380)
-        known.pack(fill="x", pady=(2, 8))
-
-        def typed(*_):
-            hints.delete(0, "end")
-            for name in self.watcher.catalog.suggest(text.get()):
-                if name.lower() != text.get().strip().lower():
-                    hints.insert("end", name)
-            item = self.watcher.catalog.resolve(text.get())
-            if item:
-                usual = f", usually sells for {w.money(item['usual'])}" if item.get("usual") else ""
-                also = f"; also finds {', '.join(item['aliases'][:4])}" if item.get("aliases") else ""
-                known.configure(text=f"Item: {item['name']}{usual}{also}")
-            elif not self.watcher.catalog.items:
-                known.configure(text="Item names aren't loaded (price site unreachable): matched as written.")
-            else:
-                known.configure(text="Not an item the price site knows: matched as a word.")
-        text.trace_add("write", typed)
-        hints.bind("<<ListboxSelect>>", lambda e: hints.curselection() and text.set(hints.get(hints.curselection()[0])))
-        typed()
-
-        exact = tk.BooleanVar(value=old.exact)
-        tk.Checkbutton(dlg, text="This exact word only (no close spellings)", variable=exact, **check).pack(anchor="w")
-        tk.Label(dlg, text="Only when… (reads the megaphone's price, like the price site does)", anchor="w",
-                 **look).pack(fill="x", pady=(10, 0))
-        sellers = tk.BooleanVar(value=old.sellers_only)
-        tk.Checkbutton(dlg, text="someone is selling it (S>), not buying", variable=sellers, **check).pack(anchor="w")
-        row = tk.Frame(dlg, bg=PANEL)
-        row.pack(anchor="w")
-        tk.Label(row, text="it costs at most", **look).pack(side="left", padx=(4, 4))
-        top = tk.StringVar(value=w.money(old.max_price) if old.max_price else "")
-        tk.Entry(row, textvariable=top, width=9, font=(FONT, 10)).pack(side="left")
-        tk.Label(row, text="mesos each  (e.g. 1.5m, 400k)", bg=PANEL, fg=SOFT, font=(FONT, 9)).pack(side="left", padx=4)
-        under = tk.BooleanVar(value=old.under_usual)
-        tk.Checkbutton(dlg, text="it is well under the usual price (20% or more below)", variable=under,
-                       **check).pack(anchor="w")
-        problem = tk.Label(dlg, anchor="w", bg=PANEL, fg=WARN, font=(FONT, 9))
-        problem.pack(fill="x")
-
-        def save():
-            name = text.get().strip()
-            price = w.parse_price(top.get()) if top.get().strip() else None
-            if not name:
-                problem.configure(text="Type a word or an item name.")
-                return
-            if top.get().strip() and not price:
-                problem.configure(text="The price should look like 1.5m, 400k or 250000.")
-                return
-            item = self.watcher.catalog.resolve(name)
-            if under.get() and not (item and item.get("usual")):
-                problem.configure(text="The usual price is only known for items the price site has sales for.")
-                return
-            entry = w.Entry(item["name"] if item and (sellers.get() or price or under.get()) else name,
-                            exact.get(), sellers.get(), price, under.get(), old.on)
-            entries = list(self.watcher.entries)
-            if index is None:
-                entries.append(entry)
-            else:
-                entries[index] = entry
-            self.save_watch(entries)
-            done()
-            dlg.destroy()
-        row = tk.Frame(dlg, bg=PANEL)
-        row.pack(anchor="e", pady=(12, 0))
-        tk.Button(row, text="Save", font=(FONT, 9), width=8, command=save).pack(side="left", padx=4)
-        tk.Button(row, text="Cancel", font=(FONT, 9), width=8, command=dlg.destroy).pack(side="left")
-        dlg.bind("<Return>", lambda e: save())
-        dlg.bind("<Escape>", lambda e: dlg.destroy())
-        field.focus_set()
 
     def render_messages(self) -> None:
         c, w, h = self.msgs.canvas, self.msgs.width, self.msgs.height
