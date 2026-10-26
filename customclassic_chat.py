@@ -36,6 +36,7 @@ import threading
 import time
 from collections import deque
 
+import guild_relay
 import twitch_chat
 from pathlib import Path
 
@@ -70,6 +71,12 @@ DEFAULTS = {
     "twitch_on": False,       # opt in: a Twitch channel's chat in a Twitch tab
     "twitch_channel": "",     # which channel
     "twitch_in_all": False,   # its chat in All too
+    "relay_code": "",         # opt in: the guild relay's guild code (guild chat to Discord, the Discord channel back)
+    "relay_share": False,     # send the guild chat this app reads to the relay
+    "relay_tab": False,       # the guild's Discord channel in a Discord tab
+    "relay_reader": "",       # this install's random id for the relay (no name)
+    "relay_admin": {},        # guild code -> admin key, for relays set up from here (to remove them)
+    "relay_url": None,        # the relay; None: the public one
     "tab": "All",
     "settings_page": "Appearance",  # the settings section open last
     "menu_close_s": 10,       # the right-click menu closes after this many seconds (0: stays until clicked away)
@@ -80,14 +87,15 @@ DEFAULTS = {
     "windows": [],            # extra chat windows: each its tab, place ("free") and see-through
 }
 MEGAPHONES = {"megaphone", "super_megaphone", "item_megaphone"}
-TABS = [("All", {"map", "whisper", "party", "buddy", "other", "system", "status"}), ("Whisper", {"whisper", "status"}),
-        ("Party", {"party", "status"}), ("Buddy", {"buddy", "status"}), ("Mega", {"mega", "status"}),
+TABS = [("All", {"map", "whisper", "party", "buddy", "guild", "other", "system", "status"}),
+        ("Whisper", {"whisper", "status"}), ("Party", {"party", "status"}), ("Buddy", {"buddy", "guild", "status"}),
+        ("Mega", {"mega", "status"}),
         ("Watch", {"watch"})]  # Watch: the lines your watch list caught, whatever chat they came from
 # what the custom tab can show, as Settings lists them
-CUSTOM_KINDS = [("map", "Map chat"), ("whisper", "Whispers"), ("party", "Party"), ("buddy", "Buddy / guild"),
-                ("twitch", "Twitch chat"),
+CUSTOM_KINDS = [("map", "Map chat"), ("whisper", "Whispers"), ("party", "Party"), ("buddy", "Buddy"), ("guild", "Guild"),
+                ("twitch", "Twitch chat"), ("discord", "Discord"),
                 ("mega", "Megaphones"), ("system", "System messages"), ("watch", "Watch list catches")]
-COLORS = {"twitch": "#bf94ff", "map": "#ffffff", "whisper": "#00ff00", "party": "#ff8fc7", "buddy": "#ff9900", "other": "#c8d2e4",
+COLORS = {"guild": "#ffb547", "discord": "#8ea1f0", "twitch": "#bf94ff", "map": "#ffffff", "whisper": "#00ff00", "party": "#ff8fc7", "buddy": "#ff9900", "other": "#c8d2e4",
           "mega": "#f2a7cf", "system": "#ffafaf", "status": "#ffc24b"}  # the game's own where measured; notes in amber
 # the game's own pop-ups that appear over the chat box: CustomClassic Chat steps aside while one is up
 POPUP = re.compile(r"(?i)\b(?:party|guild|alliance|family)\s+invit\w*\s+from\b|\b(?:trade|friend|buddy)\s+request\s+from\b"
@@ -249,7 +257,9 @@ def kind_of(line, backgrounds: dict | None = None) -> str | None:
         return "mega"
     if src == "whisper":
         return "whisper"
-    if src in ("buddy", "guild", "buddy_guild"):
+    if src == "guild":  # only with a guild colour of its own (config: [colors] guild): shared with a relay
+        return "guild"
+    if src in ("buddy", "buddy_guild"):
         return "buddy"
     if src == "party":
         return "party"
@@ -336,7 +346,8 @@ def messages_from(lines, dedupe: Dedupe, now: float, palette: tuple[dict, dict] 
             continue
         fg, bg = style_for(ln, kind, *palette) if palette else (None, None)
         msg = {"kind": kind, "time": time.strftime("%H:%M", time.localtime(now)), "name": p["name"],
-               "body": p["body"], "at": now, "to": None, "fg": fg, "bg": bg, "raw": ln.text}
+               "body": p["body"], "at": now, "to": None, "fg": fg, "bg": bg, "raw": ln.text,
+               "stamp": p.get("time")}  # the game's own time stamp: server time, the same on every screen
         if kind == "whisper" or p["sep"] in ("<<", ">>", "«", "»"):
             msg["kind"] = "whisper"
             msg["to"] = p["sep"] in ("<<", "«")  # "Name<< hi" is one you sent, "Name[Windia-15]>> hi" one you got
@@ -412,13 +423,16 @@ def custom_name(custom: dict | None) -> str | None:
     return name if name and name.lower() not in taken else "Custom"
 
 
-def tabs_for(custom: dict | None, twitch: bool = False, twitch_in_all: bool = False) -> list[tuple[str, set]]:
+def tabs_for(custom: dict | None, twitch: bool = False, twitch_in_all: bool = False,
+             discord: bool = False) -> list[tuple[str, set]]:
     """The tabs: the fixed ones, a Twitch tab after Mega when a channel is set (its chat in All
-    too if asked), and the custom tab before Watch when it's on. Map chat brings the lines of no
-    known chat type along, as All does."""
+    too if asked), a Discord tab for the guild relay's channel, and the custom tab before Watch
+    when it's on. Map chat brings the lines of no known chat type along, as All does."""
     tabs = [(n, k | {"twitch"} if n == "All" and twitch and twitch_in_all else k) for n, k in TABS]
     if twitch:
         tabs.insert(5, ("Twitch", {"twitch", "status"}))
+    if discord:
+        tabs.insert(len(tabs) - 1, ("Discord", {"discord", "status"}))
     name = custom_name(custom)
     if name:
         picked = set(custom.get("kinds") or [])
@@ -1575,6 +1589,11 @@ class ChatPanel(ChatView):
         threading.Thread(target=self.load_names, daemon=True).start()
         self.twitch = None
         self.start_twitch()
+        if not opts.get("relay_reader"):
+            opts["relay_reader"] = guild_relay.reader_id()
+            save_settings(opts)
+        self.relay = None
+        self.start_relay()
         threading.Thread(target=overlay.hotkey_thread, args=(self.events, HOTKEYS), daemon=True).start()
         threading.Thread(target=demo_loop if demo else read_loop, args=(self,), daemon=True).start()
         self.tray = start_tray(self)
@@ -1848,6 +1867,8 @@ class ChatPanel(ChatView):
                         data["padded"] = padded_kind(data["body"])
                     if data.get("padded") not in self.log.hide_padded:  # left out: no alerts either
                         self.watched(data)
+                    if self.relay and not self.demo:
+                        self.relay.send(data)  # guild chat only, and only when sharing is on
                     self.log.add(data)
                     for w in self.windows:
                         w.log.notice(data)
@@ -1918,6 +1939,8 @@ class ChatPanel(ChatView):
             self.stop.set()
             if self.twitch:
                 self.twitch.stop()
+            if self.relay:
+                self.relay.stop()
             if self.tray:
                 self.tray.stop()
             self.root.destroy()
@@ -2015,7 +2038,8 @@ class ChatPanel(ChatView):
 
     def tabs(self) -> list:
         o = self.opts
-        return tabs_for(o["custom_tab"], self.twitch_channel() is not None, o["twitch_in_all"])
+        return tabs_for(o["custom_tab"], self.twitch_channel() is not None, o["twitch_in_all"],
+                        bool(o["relay_tab"] and guild_relay.guild_code(o["relay_code"])))
 
     def retab(self, rename: tuple[str | None, str | None] = (None, None)) -> None:
         """The tabs again after a setting changed; a renamed tab that was open stays open."""
@@ -2039,6 +2063,34 @@ class ChatPanel(ChatView):
         channel = self.twitch_channel()
         if channel and not self.demo:
             self.twitch = twitch_chat.TwitchChat(channel, self.events.put)
+
+    def guild_colour_known(self) -> bool:
+        """Whether guild chat has a colour of its own (config.toml [colors] guild): only then is it
+        told apart from buddy chat, and only then is anything shared with a guild relay."""
+        import reader
+        return "guild" in reader.Config.load().colors
+
+    def relay_base(self) -> str:
+        return (self.opts["relay_url"] or guild_relay.RELAY_URL).rstrip("/")
+
+    def start_relay(self) -> None:
+        """Connect to the guild relay set in Settings, if opted into sharing or the Discord tab."""
+        if self.relay:
+            self.relay.stop()
+            self.relay = None
+        o, code = self.opts, guild_relay.guild_code(self.opts["relay_code"])
+        if code and (o["relay_share"] or o["relay_tab"]) and not self.demo:
+            self.relay = guild_relay.RelayClient(self.relay_base(), code, o["relay_reader"], self.events.put,
+                                                 o["relay_share"], o["relay_tab"])
+
+    def set_relay(self, code: str, share: bool, tab: bool) -> None:
+        self.opts["relay_code"] = guild_relay.guild_code(code)
+        self.opts["relay_share"], self.opts["relay_tab"] = share, tab
+        save_settings(self.opts)
+        self.start_relay()
+        self.retab()
+        self.scroll = 0
+        self.render()
 
     def set_twitch(self, on: bool, channel: str, in_all: bool) -> None:
         before = self.twitch_channel()

@@ -7,8 +7,10 @@ how it looks, where it sits, what the chat shows, the tabs, Twitch and the watch
 
 from __future__ import annotations
 
+import threading
 import tkinter as tk
 
+import guild_relay
 import twitch_chat
 
 # the settings window's own palette, in the panel's dark blues
@@ -16,7 +18,7 @@ BG, SIDE, CARD, FIELD = "#111827", "#0b1120", "#172033", "#0b1120"
 BORDER, ACCENT, ACCENT_HI = "#2a3654", "#3d6fd1", "#4f80e0"
 INK, SOFT, WARN = "#eef3fb", "#8f9db5", "#ffc24b"
 UI = "Segoe UI"
-PAGES = ["Appearance", "Position", "Chat", "Tabs", "Twitch", "Watch list"]
+PAGES = ["Appearance", "Position", "Chat", "Tabs", "Twitch", "Discord", "Watch list"]
 
 
 # ------------------------------------------------------------------ widgets in one style
@@ -125,7 +127,7 @@ class SettingsWindow:
         self.content.pack_propagate(False)
         self.pages: dict[str, tk.Frame] = {}
         for name, build in zip(PAGES, (self.appearance, self.position, self.chat, self.tabs, self.twitch,
-                                       self.watch_list)):
+                                       self.discord, self.watch_list)):
             page = tk.Frame(self.content, bg=BG)
             label(page, name, size=15, bold=True, bg=BG).pack(fill="x", pady=(0, 14))
             build(page)
@@ -403,6 +405,134 @@ class SettingsWindow:
         note.pack(fill="x", pady=(6, 0))
         note.configure(text=f"Reading #{app.twitch_channel()}'s chat." if app.twitch_channel() else
                        "Off. Tick Show Twitch chat to turn it on.")
+
+    def discord(self, page) -> None:
+        """The guild chat relay: join with a guild code, or set one up for the guild."""
+        app, opts, top = self.app, self.opts, self.top
+        base = app.relay_base()
+        code = tk.StringVar(value=opts["relay_code"])
+        share = tk.BooleanVar(value=opts["relay_share"])
+        tab = tk.BooleanVar(value=opts["relay_tab"])
+
+        def later(fn, *args, then=None):
+            """Ask the relay without freezing the window; `then` gets the answer (or the error)."""
+            def work():
+                try:
+                    out = fn(*args)
+                except Exception as e:  # shown to the user as it is
+                    out = e
+                if then:
+                    top.after(0, lambda: top.winfo_exists() and then(out))
+            threading.Thread(target=work, daemon=True).start()
+
+        c = card(page, "Guild chat relay", "Your guild's chat in the guild's Discord channel, posted once however "
+                                           "many members share it, and that channel back in a Discord tab. Only guild "
+                                           "chat is ever sent: never whispers, party, buddy or map chat. Off until "
+                                           "you turn it on; ask your guild first.")
+        row = tk.Frame(c, bg=CARD)
+        row.pack(fill="x")
+        label(row, "Guild code").pack(side="left")
+        field = entry(row, code, 12)
+        field.pack(side="left", padx=8, ipady=2)
+        note = label(c, "", soft=True, size=9, wrap=470)
+
+        def show_guild(info):
+            if isinstance(info, dict):
+                extra = "" if info.get("discord_tab") else " (The relay can't read Discord yet, so the Discord tab stays empty.)"
+                note.configure(text=f"Guild: {info['name']}.{extra}", fg=SOFT)
+            else:
+                note.configure(text="The relay doesn't know that guild code." if info is None else
+                               "Can't reach the relay right now.", fg=WARN)
+
+        def use(*_):
+            value = guild_relay.guild_code(code.get())
+            if code.get().strip() and not value:
+                note.configure(text="A guild code looks like ABCD-EFGH.", fg=WARN)
+                return
+            code.set(value)
+            app.set_relay(value, share.get(), tab.get())
+            if value:
+                note.configure(text="Checking the code…", fg=SOFT)
+                later(guild_relay.guild_info, base, value, then=show_guild)
+            else:
+                note.configure(text="No guild relay.", fg=SOFT)
+            show_admin()
+        button(row, "Use", use).pack(side="left")
+        field.bind("<Return>", use)
+        check(c, "Share my guild chat", share, use).pack(fill="x", pady=(8, 0))
+        check(c, "Show the guild's Discord channel in a Discord tab", tab, use).pack(fill="x")
+        if not app.guild_colour_known():
+            warn = label(c, "Guild chat isn't told apart from buddy chat yet (its colour hasn't been measured), "
+                            "so nothing is shared until it is.", size=9, wrap=470)
+            warn.configure(fg=WARN)
+            warn.pack(fill="x", pady=(6, 0))
+        note.pack(fill="x", pady=(4, 0))
+        if guild_relay.guild_code(opts["relay_code"]):
+            later(guild_relay.guild_info, base, guild_relay.guild_code(opts["relay_code"]), then=show_guild)
+
+        c = card(page, "Set up a relay for your guild",
+                 "For whoever runs the guild's Discord: in the channel's settings, Integrations → Webhooks → New "
+                 "Webhook → Copy Webhook URL, and paste it here. You get the guild code to give your members. The "
+                 "link stays on the relay: members never see it.")
+        row = tk.Frame(c, bg=CARD)
+        row.pack(fill="x")
+        label(row, "Guild name").pack(side="left")
+        gname = tk.StringVar()
+        entry(row, gname, 16).pack(side="left", padx=8, ipady=2)
+        row = tk.Frame(c, bg=CARD)
+        row.pack(fill="x", pady=(6, 0))
+        label(row, "Webhook link").pack(side="left")
+        hook = tk.StringVar()
+        hook_field = entry(row, hook, 34)
+        hook_field.configure(show="•")  # a secret: anyone holding it can post in the channel
+        hook_field.pack(side="left", padx=8, ipady=2)
+        made = label(c, "", soft=True, size=9, wrap=470)
+        buttons = tk.Frame(c, bg=CARD)
+        buttons.pack(fill="x", pady=(8, 0))
+
+        def created(out):
+            if isinstance(out, Exception):
+                made.configure(text=str(out) or "Can't reach the relay right now.", fg=WARN)
+                return
+            opts["relay_admin"] = {**opts["relay_admin"], out["code"]: out["admin_key"]}
+            hook.set("")
+            code.set(out["code"])
+            use()
+            top.clipboard_clear()
+            top.clipboard_append(out["code"])
+            made.configure(text=f"Done: guild code {out['code']} (copied). Give it to your members. A note went to "
+                                "the Discord channel to say the relay is connected.", fg=INK)
+
+        def create():
+            if len(gname.get().strip()) < 2 or not hook.get().strip():
+                made.configure(text="Type the guild's name and paste the webhook link.", fg=WARN)
+                return
+            made.configure(text="Setting it up…", fg=SOFT)
+            later(guild_relay.create_guild, base, gname.get().strip(), hook.get().strip(), then=created)
+        button(buttons, "Create the relay", create, primary=True).pack(side="left")
+
+        def removed(out):
+            if out is True:
+                opts["relay_admin"] = {k: v for k, v in opts["relay_admin"].items() if k != code.get()}
+                code.set("")
+                use()
+                made.configure(text="The relay is removed: members' apps stop sending.", fg=SOFT)
+            else:
+                made.configure(text="Couldn't remove it right now.", fg=WARN)
+
+        def remove():
+            key = opts["relay_admin"].get(code.get())
+            if key:
+                later(guild_relay.remove_guild, base, code.get(), key, then=removed)
+        remove_btn = button(buttons, "Remove this relay", remove)
+
+        def show_admin():
+            if opts["relay_admin"].get(guild_relay.guild_code(code.get())):
+                remove_btn.pack(side="left", padx=(8, 0))
+            else:
+                remove_btn.pack_forget()
+        show_admin()
+        made.pack(fill="x", pady=(6, 0))
 
     def watch_list(self, page) -> None:
         app, opts = self.app, self.opts

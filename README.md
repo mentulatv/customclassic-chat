@@ -157,6 +157,31 @@ own name colour, and in All too if you tick **Show it in All too**. The custom t
 as well. CustomClassic Chat reads the chat as a guest, the way anyone can watch a channel's chat
 without logging in: no account, key or password, and it never writes in the chat.
 
+## Guild chat relay to Discord (opt-in)
+
+Your guild's chat in your guild's Discord channel, and that channel back in a **Discord** tab.
+
+- **Whoever runs the guild's Discord** sets it up once: in the channel's settings, *Integrations →
+  Webhooks → New Webhook → Copy Webhook URL*, then in CustomClassic Chat *Settings → Discord → Set
+  up a relay for your guild*, paste it and press **Create the relay**. That gives a **guild code**
+  (like `ABCD-EFGH`) to hand out. The webhook link stays on the relay; members never see it.
+- **Members** paste the guild code in *Settings → Discord*, then tick **Share my guild chat** and/or
+  **Show the guild's Discord channel in a Discord tab**.
+
+**Any number of members can share without duplicates.** Every message carries the game's own time
+stamp, which is server time and the same on every screen, so the relay knows when several members
+read the same message: same minute, same speaker, nearly the same text. It waits about two seconds
+for everyone's reading, then posts the version most of them read, once (text recognition's slips,
+like "rn" for "m", lose). More members sharing means fewer gaps, never more copies.
+
+**What is sent:** only guild chat, with the speaker's name and the game's time stamp. Never
+whispers, party, buddy or map chat, and nothing is ever typed into the game: messages from Discord
+only show in the Discord tab. Guild chat waits on the relay a few seconds in memory and isn't
+stored. Ask your guild before turning it on.
+
+> Guild chat has to be told apart from buddy chat by its colour first. Until that colour is
+> measured, nothing is shared (Settings → Discord says so).
+
 ## Watch list
 
 Settings… → **Watch list** → **Add…**. Each entry is a word or an item name:
@@ -205,6 +230,7 @@ asked for; the game's process is never opened.
 | `customclassic_chat.py` | the panel, tabs and the reading loop |
 | `settings_ui.py` | the settings window |
 | `twitch_chat.py` | Twitch chat, read as a guest |
+| `guild_relay.py` | the guild chat relay to Discord, from the app's side |
 | `reader.py` | text recognition and chat colours |
 | `watch.py` | the watch list |
 | `trade_parser.py`, `data/` | reads prices in megaphones (from the Maple Price Index) |
@@ -231,7 +257,6 @@ each chat line of a saved screenshot lands in. Tests: `python -m pytest`.
 
 ## Roadmap
 
-- **Discord channel** chat in its own tab (opt-in, like Twitch)
 - **Chatting back**: logging in with Twitch or Discord to write in those chats from CustomClassic Chat
 
 ## License
