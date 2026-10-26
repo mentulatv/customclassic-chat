@@ -94,7 +94,8 @@ HK_EDIT, HK_HIDE, HK_QUIT, HK_FIT = 1, 2, 3, 4
 _STAMP = r"^[^\w\[({]{0,3}(?:(?:[\[({]\s?)?(?P<time>\d{1,2}\s?[:.;]\s?\d{2})\s?[\])}jlI|1]?)?\s*"
 _NAME = r"(?P<name>(?=[A-Za-z0-9]*[A-Za-z])[A-Za-z0-9]{2,13})"  # at least one letter: "16" of a lost "[16:39]" isn't one
 _MSG = re.compile(_STAMP + r"(?:\[[^\]]{1,25}\]\s*)?"                                       # a medal
-                  + _NAME + r"\s*(?P<sep><<|>>|«|»|[:;])\s?(?P<body>.*)$")
+                  + _NAME + r"\s*(?:\[(?P<where>[^\]]{1,24})\]\s*)?"  # a whisper's world-channel: "Name[Windia-15]>> hi"
+                  + r"(?P<sep><<|>>|«|»|[:;])\s?(?P<body>.*)$")
 _LOOSE = re.compile(_STAMP + _NAME + r"[^:;]{0,14}[:;]\s?(?P<body>.*)$")  # "Tarvin CH22 : S> ..."
 
 
@@ -107,8 +108,11 @@ def parse(text: str, loose: bool = False) -> dict | None:
     m = _MSG.match(text.strip()) or (_LOOSE.match(text.strip()) if loose else None)
     if not m or not m.group("body").strip():
         return None
-    return {"name": m.group("name"), "body": m.group("body").strip(), "sep": m.groupdict().get("sep") or ":",
-            "time": real_time(m.group("time"))}
+    out = {"name": m.group("name"), "body": m.group("body").strip(), "sep": m.groupdict().get("sep") or ":",
+           "time": real_time(m.group("time"))}
+    if m.groupdict().get("where"):  # a received whisper's "[Windia-15]"
+        out["where"] = m.group("where")
+    return out
 
 
 def real_time(text: str | None) -> str | None:
@@ -316,7 +320,10 @@ def messages_from(lines, dedupe: Dedupe, now: float, palette: tuple[dict, dict] 
                "body": p["body"], "at": now, "to": None, "fg": fg, "bg": bg}
         if kind == "whisper" or p["sep"] in ("<<", ">>", "«", "»"):
             msg["kind"] = "whisper"
-            msg["to"] = p["sep"] in ("<<", "«")  # "Name<< hi" is one you sent, "Name>> hi" one you got
+            msg["to"] = p["sep"] in ("<<", "«")  # "Name<< hi" is one you sent, "Name[Windia-15]>> hi" one you got
+            ch = re.search(r"(\d{1,2})\s*$", p.get("where") or "")
+            if ch:
+                msg["ch"] = int(ch[1])  # the sender's channel, to find them
         out.append(msg)
     return out
 
@@ -329,7 +336,7 @@ def line_text(msg: dict, stamps: str = "seconds") -> str:
     so it's there even when the game shows no time stamps."""
     who = msg["name"]
     if msg["kind"] == "whisper":
-        who = f"{'To' if msg['to'] else 'From'} {msg['name']}"
+        who = f"{'To' if msg['to'] else 'From'} {msg['name']}" + (f" (ch {msg['ch']})" if msg.get("ch") else "")
     text = f"{who} : {msg['body']}" if who else msg["body"]
     fmt = STAMP_FORMATS.get(stamps, "%H:%M:%S")
     return f"[{time.strftime(fmt, time.localtime(msg['at']))}] {text}" if fmt else text

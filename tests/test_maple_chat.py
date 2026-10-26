@@ -330,3 +330,12 @@ def test_lines_padded_with_spacers():
     assert [m["name"] for m in log.visible()] == ["Njoyer"]
     log.hide_padded = set()  # shown again: they were kept
     assert [m["name"] for m in log.visible()] == ["Forage", "Kpqer", "Njoyer"]
+
+
+def test_received_whispers_carry_the_senders_world_and_channel():
+    p = mc.parse("[18:49]Nimbi[W/india-15]>> W/hat level are ya?")  # as text recognition read it
+    assert (p["name"], p["sep"], p["where"], p["body"]) == ("Nimbi", ">>", "W/india-15", "W/hat level are ya?")
+    got = mc.messages_from([line("[18:49]Nimbi[Windia-15]>> what level are ya?", "whisper"),
+                            line("[18:50] Nimbi<< like 14", "whisper")], mc.Dedupe(), 0.0)
+    assert [(m["kind"], m["to"], m.get("ch")) for m in got] == [("whisper", False, 15), ("whisper", True, None)]
+    assert mc.line_text(got[0], "off") == "From Nimbi (ch 15) : what level are ya?"
