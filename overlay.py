@@ -30,6 +30,7 @@ if user32:
     user32.SetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_long]
     user32.GetAncestor.restype = wintypes.HWND
     user32.GetAncestor.argtypes = [wintypes.HWND, ctypes.c_uint]
+    user32.GetForegroundWindow.restype = wintypes.HWND
     user32.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int,
                                     ctypes.c_int, ctypes.c_int, ctypes.c_uint]
 
@@ -79,7 +80,7 @@ class Overlay:
         self.canvas.pack(fill="both", expand=True)
         self.canvas.bind("<ButtonPress-1>", self._press)
         self.canvas.bind("<B1-Motion>", self._drag)
-        self.edit = self.hidden = False
+        self.edit = self.hidden = self.typing = False
         self.through = click_through
         self._grab = None
         self.root.update_idletasks()
@@ -99,24 +100,32 @@ class Overlay:
         style = user32.GetWindowLongW(self.hwnd, GWL_EXSTYLE)
         style |= WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TOPMOST
         style = style | WS_EX_TRANSPARENT if on else style & ~WS_EX_TRANSPARENT
+        if self.typing:  # shown again or restyled while typing in it: it keeps the keyboard
+            style &= ~WS_EX_NOACTIVATE & ~WS_EX_TRANSPARENT
         user32.SetWindowLongW(self.hwnd, GWL_EXSTYLE, style)
         self.keep_on_top(again=False)
 
     def take_keyboard(self) -> None:
         """Let this window have the keyboard for a moment (typing in it): it normally never takes
         it, so the game keeps it. give_back() hands it to whichever window had it before."""
-        user32.GetForegroundWindow.restype = wintypes.HWND
-        self._before = user32.GetForegroundWindow()
+        before = user32.GetForegroundWindow()
+        if before != self.hwnd:  # clicked again while typing: still the game's to go back to
+            self._before = before
+        self.typing = True
         style = user32.GetWindowLongW(self.hwnd, GWL_EXSTYLE)
         user32.SetWindowLongW(self.hwnd, GWL_EXSTYLE, style & ~WS_EX_NOACTIVATE & ~WS_EX_TRANSPARENT)
-        user32.SetForegroundWindow(self.hwnd)
-        self.root.focus_force()
+        user32.SetForegroundWindow(self.hwnd)  # allowed: the click that started this came to us
 
-    def give_back(self) -> None:
-        style = user32.GetWindowLongW(self.hwnd, GWL_EXSTYLE)
-        user32.SetWindowLongW(self.hwnd, GWL_EXSTYLE, style | WS_EX_NOACTIVATE)
+    def has_keyboard(self) -> bool:
+        return user32.GetForegroundWindow() == self.hwnd
+
+    def give_back(self, refocus: bool = True) -> None:
+        """Back to never taking the keyboard; with refocus, the window that had it gets it again
+        (not when the user already clicked somewhere else)."""
+        self.typing = False
+        self.click_through(self.through and not self.edit)
         before = getattr(self, "_before", None)
-        if before and before != self.hwnd:
+        if refocus and before and self.has_keyboard():
             user32.SetForegroundWindow(before)
         self._before = None
 

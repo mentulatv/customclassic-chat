@@ -1107,7 +1107,7 @@ class ChatView:
         self.input.bind("<Button-1>", self.start_typing)
         self.input.bind("<Return>", self.send_typed)
         self.input.bind("<Escape>", lambda e: self.stop_typing())
-        self.input.bind("<FocusOut>", lambda e: self.stop_typing())
+        self.input.bind("<FocusOut>", lambda e: self.typing and self.input.after(150, self.check_keyboard))
         self.typing = False
 
     @property
@@ -1406,14 +1406,30 @@ class ChatView:
             self.placeholder = False
         self.input.configure(fg=INK)
         self.typing = True
-        self.msgs.take_keyboard()  # the keyboard comes here until Enter or Esc
-        self.input.focus_set()
+        self.msgs.take_keyboard()  # the keyboard comes here until Enter, Esc or a click elsewhere
+        self.input.focus_force()
+        self.input.after(120, lambda: self.check_keyboard(handing_over=True))
 
-    def stop_typing(self) -> None:
+    def check_keyboard(self, handing_over: bool = False) -> None:
+        """Tk says FocusOut for moves inside the app too, and while Windows hands the keyboard
+        over: only a keyboard that really went to another window (a click on the game) ends the
+        typing. Right after the click, a late hand-over is asked for once more instead."""
+        if not self.typing:
+            return
+        if self.msgs.has_keyboard():
+            if self.input.focus_get() is not self.input:
+                self.input.focus_force()
+        elif handing_over:
+            self.msgs.take_keyboard()
+            self.input.focus_force()
+        else:
+            self.stop_typing(refocus=False)  # the keyboard is where the user clicked: leave it there
+
+    def stop_typing(self, refocus: bool = True) -> None:
         if not self.typing:
             return
         self.typing = False
-        self.msgs.give_back()  # and goes back to the game
+        self.msgs.give_back(refocus)  # and goes back to the game
         if not self.typed.get():
             self.place_input()
 
@@ -1971,7 +1987,9 @@ class ChatPanel(ChatView):
             # (no game window found then), everything hides
             up = bool(game) or self.always_show
             # unlocked, it isn't over the game's chat: nothing there to step aside for
-            visible = bool(up and (rect or unlocked)) and not self.user_hidden and not (self.covered and not unlocked)
+            # (while typing in it, nothing the game draws over its chat sends it away)
+            stays = unlocked or self.typing
+            visible = bool(up and (rect or unlocked)) and not self.user_hidden and not (self.covered and not stays)
             self.show(visible)
             for w in self.windows:  # a split goes with the panel; a window is never over the game's chat
                 w.show(visible if w.docked else up and not self.user_hidden)

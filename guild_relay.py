@@ -331,7 +331,9 @@ class GuildPeer:
 
     def say(self, data: dict, retain: bool = False, sub: str = "chat") -> None:
         """Seal a message and hand it to every broker."""
-        blob = self.seal.seal({**data, "id": uuid.uuid4().hex, "from": self.reader})
+        mid = uuid.uuid4().hex
+        self.seen.append(mid)  # the brokers send it back to us too: already handled here
+        blob = self.seal.seal({**data, "id": mid, "from": self.reader})
         for c in self.clients:
             try:
                 c.publish(f"{self.seal.topic}/{sub}", blob, qos=1, retain=retain)

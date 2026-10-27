@@ -57,6 +57,19 @@ def test_typing_reaches_the_guild_signed():
     assert said == [("Rowan · app", "hi all @​everyone")]
 
 
+def test_what_you_type_shows_once_for_you():
+    shown = []
+    cfg = {"webhook": "https://discord.com/api/webhooks/123456789012/" + "a" * 40, "server_id": "555"}
+    a = g.GuildPeer("ABCD-EFGH-JKLM", "pc-a", shown.append, False, True, connect=False, cfg=cfg, bot_key=PUBLIC,
+                    post=lambda url, user, text: None, login=login())
+    sent = []
+    a.clients = [type("Broker", (), {"publish": lambda self, topic, blob, **kw: sent.append(blob)})()] * 2
+    assert a.say_chat("hi") == ""
+    for blob in sent:  # both brokers hand it back
+        a.heard(blob)
+    assert [m[1]["body"] for m in shown if m[0] == "msg"] == ["hi"]
+
+
 def test_a_faked_or_foreign_login_shows_unverified():
     a, b, heard, _ = peers()
     a.login = login(server="999")  # a login from another Discord server
