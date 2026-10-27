@@ -301,6 +301,9 @@ def make_bot(store: Store, channels: Channels, key=None):
             return
         if should_pass_on(message, row):
             channels.discord_message(row["key"], message.author.display_name, message.content)
+        else:  # why a message in a set-up channel didn't go to the Guild tabs (never what it says)
+            log.info("not passed on in %s: words=%s bot=%s webhook=%s", row["name"], bool(message.content),
+                     message.author.bot, message.webhook_id)
 
     async def republish():
         while True:

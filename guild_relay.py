@@ -256,6 +256,24 @@ def check_webhook(url: str) -> dict:
     return {"webhook_id": m.group(1), "channel_id": str(r.json().get("channel_id") or "")}
 
 
+def who(game: str, discord: str) -> str:
+    """The name a typed message goes under: the character's, with the Discord name after it when
+    the two don't look like the same person ("islandgirl - @mentula"); one name when one is part of
+    the other ("mentula" and "mentulatv": mentula), or when there's no character name."""
+    game, discord = clean(game).strip()[:20], clean(discord).strip()[:32]
+    if not game or not discord:
+        return game or discord or "?"
+    if game.casefold() in discord.casefold() or discord.casefold() in game.casefold():
+        return game
+    return f"{game} - @{discord}"
+
+
+def webhook_name(name: str) -> str:
+    """Discord turns down webhook names with @, # or "discord" in them: look-alikes instead."""
+    name = name.replace("@", "＠").replace("#", "＃")
+    return re.sub(r"(?i)discord", lambda m: m.group(0).replace("o", "ο").replace("O", "Ο"), name)[:80]
+
+
 def post_webhook(url: str, username: str, content: str) -> None:
     import httpx
     payload = {"username": username[:80], "content": content, "allowed_mentions": {"parse": []}}
@@ -296,6 +314,7 @@ class GuildPeer:
             self.cfg = {k: admin[k] for k in ("name", "webhook", "webhook_id", "channel_id") if k in admin}
             self.cfg["has_bot"] = bool(admin.get("bot"))
         self.login = login  # this app's signed login (from the magic link), for typing in the Guild tab
+        self.game_name = ""  # this player's character name, shown with the Discord name when they differ
         self.bot_key = bot_key  # the bot's public key (tests give their own)
         self.post = post or post_webhook
         self.read = read or read_channel
@@ -367,7 +386,7 @@ class GuildPeer:
             claims = check_login(str(msg.get("login", "")), self.bot_key, now)
             server = self.cfg.get("server_id")
             ok = bool(claims) and (not server or str(claims.get("server")) == server)
-            name = str(claims["name"] if ok else msg.get("name", "?"))[:32]
+            name = who(str(msg.get("game", "")), str(claims["name"] if ok else msg.get("name", "?")))
             self.put(("msg", {"kind": "guildsay", "name": name + (" ✓" if ok else " (unverified)"),
                               "body": clean(str(msg.get("text", ""))), "at": now, "time": time.strftime("%H:%M"),
                               "to": None, "fg": None, "bg": None}))
@@ -393,16 +412,17 @@ class GuildPeer:
         text = clean(text)[:400]
         if not text:
             return ""
-        self.say({"t": "say", "text": text, "login": self.login, "name": claims["name"]})
-        self.put(("msg", {"kind": "guildsay", "name": claims["name"] + " ✓", "body": text, "at": time.time(),
+        self.say({"t": "say", "text": text, "login": self.login, "name": claims["name"], "game": self.game_name})
+        name = who(self.game_name, claims["name"])
+        self.put(("msg", {"kind": "guildsay", "name": name + " ✓", "body": text, "at": time.time(),
                           "time": time.strftime("%H:%M"), "to": None, "fg": None, "bg": None}))
         if self.cfg.get("webhook"):
-            threading.Thread(target=self._post_said, args=(claims["name"], text), daemon=True).start()
+            threading.Thread(target=self._post_said, args=(name, text), daemon=True).start()
         return ""
 
     def _post_said(self, name: str, text: str) -> None:
         try:
-            self.post(self.cfg["webhook"], f"{name} · app", text)
+            self.post(self.cfg["webhook"], webhook_name(name), text)
         except Exception as e:
             self.error = f"Discord refused a post ({e.__class__.__name__})"
 

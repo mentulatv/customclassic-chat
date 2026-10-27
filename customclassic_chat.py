@@ -79,6 +79,7 @@ DEFAULTS = {
     "relay_cfg": {},          # guild code -> the guild's details as last heard (its name and Discord webhook)
     "relay_admin": {},        # guild code -> guilds set up from here: name, webhook, and the Discord bot token if any
     "guild_login": "",        # this app's login from the bot's magic link (/chatlink): to type in the Guild tab
+    "game_name": "",          # your character's name, shown with your Discord name on what you type (if they differ)
     "tab": "All",
     "settings_page": "Appearance",  # the settings section open last
     "menu_close_s": 10,       # the right-click menu closes after this many seconds (0: stays until clicked away)
@@ -2153,6 +2154,11 @@ class ChatPanel(ChatView):
         self.render()
         save_settings(self.opts)
 
+    def game_name(self) -> str:
+        """Your character's name for what you type in the Guild tab: as set, or your first
+        character name from the Chat page."""
+        return self.opts["game_name"].strip() or next(iter(self.opts["ignore_names"]), "")
+
     def set_opt(self, key: str, value) -> None:
         self.opts[key] = value
         save_settings(self.opts)
@@ -2240,6 +2246,7 @@ class ChatPanel(ChatView):
             self.relay = guild_relay.GuildPeer(code, o["relay_reader"], self.events.put, o["relay_share"],
                                                o["relay_tab"], o["relay_source"], cfg=o["relay_cfg"].get(code),
                                                admin=admin, login=o["guild_login"])
+            self.relay.game_name = self.game_name()
 
     def set_relay(self, code: str, share: bool, tab: bool, source: str | None = None) -> None:
         self.opts["relay_code"] = guild_relay.guild_key(code)

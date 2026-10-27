@@ -416,10 +416,8 @@ class SettingsWindow:
         tab = tk.BooleanVar(value=opts["relay_tab"])
         source = tk.StringVar(value=opts["relay_source"] if opts["relay_source"] in dict(guild_relay.SOURCES)
                               else "guild")
-        c = card(page, "1. Join your guild", "Your guild's chat goes to its Discord channel, and the channel "
-                                             "comes to a Guild tab here. Get the code in your guild's Discord: "
-                                             "/guildcode there. Members' apps share it with each other directly, "
-                                             "and only the kind of chat picked below is sent.")
+        c = card(page, "1. Join your guild", "Your guild's chat to its Discord channel, and the channel in a Guild "
+                                             "tab here. Get the code with /guildcode in your guild's Discord.")
         row = tk.Frame(c, bg=CARD)
         row.pack(fill="x")
         label(row, "Guild code or name").pack(side="left")
@@ -431,9 +429,8 @@ class SettingsWindow:
 
         def show_waiting():
             if source.get() == "guild" and not app.guild_colour_known():
-                waiting.configure(text="The game doesn't have guild chat yet. This app already looks for it in "
-                                       "old MapleStory's guild purple, and shares it once it shows up. To try it "
-                                       "meanwhile, share map chat or whispers.")
+                waiting.configure(text="No guild chat in the game yet: it's looked for in old MapleStory's purple. "
+                                       "Share map chat or whispers to try it meanwhile.")
             elif source.get() != "guild":
                 kind = dict(guild_relay.SOURCES)[source.get()].split(" (")[0].lower()
                 waiting.configure(text=f"Testing: your {kind} goes to the guild's Discord, labelled as such. "
@@ -492,12 +489,27 @@ class SettingsWindow:
                 top.after(3000, tick)
         tick()
 
-        c = card(page, "2. Log in to type in the Guild tab", "Type /chatlink in your guild's Discord and open the "
-                                                             "link it gives you, with this app running. What you "
-                                                             "type then carries your Discord name, and everyone "
-                                                             "sees it's really you (✓).")
+        c = card(page, "2. Log in to type in the Guild tab", "/chatlink in your guild's Discord, then open its link "
+                                                             "with this app running: what you type shows it's you (✓).")
+        row = tk.Frame(c, bg=CARD)
+        row.pack(fill="x", pady=(0, 6))
+        label(row, "Your character's name").pack(side="left")
+        game = tk.StringVar(value=opts["game_name"] or next(iter(opts["ignore_names"]), ""))
+        entry(row, game, 16).pack(side="left", padx=8, ipady=2)
+        shown = label(c, "", soft=True, size=9, wrap=470)
+        shown.pack(fill="x")
         who = label(c, "", size=9)
         who.pack(fill="x")
+
+        def show_name(*_):
+            claims = guild_relay.check_login(opts["guild_login"]) if opts["guild_login"] else None
+            if game.get().strip() != opts["game_name"]:
+                app.set_opt("game_name", game.get().strip())
+                if app.relay:
+                    app.relay.game_name = app.game_name()
+            shown.configure(text=f"Your messages show as: {guild_relay.who(app.game_name(), claims['name'])}" if claims
+                            else "Shown with your Discord name when the two differ (islandgirl - @mentula).")
+        game.trace_add("write", show_name)
 
         def show_login():
             claims = guild_relay.check_login(opts["guild_login"]) if opts["guild_login"] else None
@@ -515,6 +527,7 @@ class SettingsWindow:
             show_login()
         out = button(c, "Log out", log_out)
         show_login()
+        show_name()
         if opts["guild_login"]:  # nothing to log out of otherwise
             out.pack(anchor="w", pady=(6, 0))
         row = tk.Frame(page, bg=BG)

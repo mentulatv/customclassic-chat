@@ -54,7 +54,7 @@ def test_typing_reaches_the_guild_signed():
     time.sleep(0.3)  # the post to Discord goes on its own thread
     [(kind, msg)] = heard
     assert (msg["kind"], msg["name"], msg["body"]) == ("guildsay", "Rowan ✓", "hi all @​everyone")
-    assert said == [("Rowan · app", "hi all @​everyone")]
+    assert said == [("Rowan", "hi all @​everyone")]
 
 
 def test_what_you_type_shows_once_for_you():
@@ -94,3 +94,16 @@ def test_the_magic_link_reaches_the_app(monkeypatch):
     except urllib.error.HTTPError as e:
         assert e.code == 400
     assert events.empty()
+
+
+def test_character_and_discord_name_both_show_when_they_differ():
+    assert g.who("islandgirl", "mentula") == "islandgirl - @mentula"
+    assert g.who("mentula", "Mentula") == "mentula"  # the same person by name: once
+    assert g.who("mentula", "mentulatv") == "mentula" and g.who("", "mentula") == "mentula"
+    assert g.webhook_name("islandgirl - @mentula") == "islandgirl - ＠mentula"  # Discord turns down a plain @
+    assert "discord" not in g.webhook_name("discordfan - @x").lower()
+    a, b, heard, said = peers()
+    a.login, a.game_name = login(), "islandgirl"
+    assert a.say_chat("hi") == ""
+    time.sleep(0.3)
+    assert heard[0][1]["name"] == "islandgirl - @Rowan ✓" and said == [("islandgirl - ＠Rowan", "hi")]

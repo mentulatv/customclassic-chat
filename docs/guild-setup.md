@@ -73,8 +73,10 @@ share. More members sharing just means fewer gaps.
    *CustomClassic Chat is logged in as …*. You can close that tab.
 3. Open the **Guild** tab, click the line at the bottom, type, and press **Enter**.
 
-Your message goes to the Discord channel and to every member's Guild tab under your Discord name
-with a ✓. The ✓ means the bot vouched for that name. A login lasts 90 days; then `/chatlink`
+Put **your character's name** in *Settings → Guild* too. Your message goes to the Discord channel
+and to every member's Guild tab under your character's name, with your Discord name after it when
+the two differ (`islandgirl - @mentula`; just `mentula` when they match). The ✓ means the bot
+vouched for the Discord name. A login lasts 90 days; then `/chatlink`
 again. **Esc** or a click on the game gives the keyboard back to the game.
 
 The link is yours alone: don't share it. *Settings → Guild → Log out* removes the login from this
