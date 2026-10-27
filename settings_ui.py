@@ -409,7 +409,7 @@ class SettingsWindow:
     def discord(self, page) -> None:
         """Joining the guild's chat-to-Discord with its code (or name), and what to share or see."""
         app, opts, top = self.app, self.opts, self.top
-        code = tk.StringVar(value=guild_relay.key_label(opts["relay_code"]))
+        code = self.discord_code = tk.StringVar(value=guild_relay.key_label(opts["relay_code"]))
         share = tk.BooleanVar(value=opts["relay_share"])
         tab = tk.BooleanVar(value=opts["relay_tab"])
         source = tk.StringVar(value=opts["relay_source"] if opts["relay_source"] in dict(guild_relay.SOURCES)
@@ -535,6 +535,7 @@ class SettingsWindow:
             hook.set("")
             bot.set("")
             app.set_relay(key, opts["relay_share"], opts["relay_tab"])
+            self.discord_code.set(guild_relay.key_label(key))  # the Discord page shows the new guild too
             top.clipboard_clear()
             top.clipboard_append(guild_relay.key_label(key))
             made.configure(text=f"Done. Members join with {guild_relay.key_label(key)} (copied); how to join is posted "
@@ -563,6 +564,7 @@ class SettingsWindow:
                 app.relay.close_guild()
                 opts["relay_admin"] = {k: v for k, v in opts["relay_admin"].items() if k != key}
                 app.set_relay("", False, False)
+                self.discord_code.set("")
                 made.configure(text="Closed: members' apps stop sending to it.", fg=SOFT)
         if guild_relay.guild_key(opts["relay_code"]) in opts["relay_admin"]:
             button(row, "Close this guild", close).pack(side="left", padx=(8, 0))
