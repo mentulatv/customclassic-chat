@@ -16,7 +16,7 @@ There are two parts:
 ## For the guild leader (once)
 
 You need permission to manage the Discord server (to add a bot), and a text channel for guild
-chat, for example `#guild`.
+chat, for example `#guild`. If it's a private channel, give the bot **View Channel**, **Send Messages** and **Read Message History** there after adding it.
 
 1. **Add the bot.** In CustomClassic Chat: *Settings → Guild setup → Add the CustomClassic Chat bot
    to your server*. Pick your server and choose **Add to Server**. Don't choose *Add to My Apps*:
@@ -109,7 +109,7 @@ while your app is running. Logins (`/chatlink`) and typing come from the shared 
 | `/chatsetup` doesn't show up | Make sure the bot is in the server's member list; if not, add it again with **Add to Server**. Commands can take a minute to appear after adding. |
 | *"Waiting for the guild's details…"* | The code is right, but no details have come yet. Give it a minute; check the code with `/guildcode`. |
 | *"Not sharing"* | Tick **Share my chat**. |
-| Nothing from Discord in the Guild tab | The guild has no bot (own setup without one). Ask the guild leader. |
+| Nothing from Discord in the Guild tab | The bot can't see the channel (common with private channels): *Edit Channel → Permissions*, add **CustomClassic Chat**, allow **View Channel**, **Send Messages** and **Read Message History**. In an own setup without a bot, Discord messages don't come through at all. |
 | Names show *(unverified)* | That message came from someone who isn't logged in, or logged in for another Discord server. |
 | *"port 47321 is taken"* | Another program uses the port the login link needs. Close it and start CustomClassic Chat again. |
 | The login link page says it isn't a working login | It ran out or was already replaced: `/chatlink` again. |
