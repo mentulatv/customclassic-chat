@@ -38,6 +38,8 @@ from dataclasses import dataclass, field
 from rapidfuzz import fuzz
 
 BROKERS = [("broker.emqx.io", 8883), ("broker.hivemq.com", 8883)]  # free public MQTT brokers, over TLS
+# the shared CustomClassic Chat bot (bot/ccchat_bot.py): its public application id, for its invite link
+SHARED_BOT_ID = ""
 ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # no 0/O or 1/I: easy to read out
 CODE = re.compile(r"^[A-Z2-9]{12}$")
 WEBHOOK = re.compile(r"^https://(?:canary\.|ptb\.)?discord(?:app)?\.com/api/webhooks/(\d{5,25})/([\w-]{20,120})$")
@@ -439,6 +441,14 @@ def check_bot(token: str, channel_id: str) -> str:
     if seen.status_code != 200:
         raise ValueError(f"Discord said no ({seen.status_code}).")
     return me.json().get("global_name") or me.json().get("username") or "the bot"
+
+
+def shared_bot_invite() -> str:
+    """The link that adds the shared CustomClassic Chat bot to a Discord server ('' until it exists)."""
+    if not SHARED_BOT_ID:
+        return ""
+    return (f"https://discord.com/oauth2/authorize?client_id={SHARED_BOT_ID}&scope=bot%20applications.commands"
+            "&permissions=536939520")  # view channel, send, read history, manage webhooks
 
 
 def bot_invite(token: str) -> str:

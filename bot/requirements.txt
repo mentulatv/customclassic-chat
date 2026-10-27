@@ -1,0 +1,4 @@
+discord.py>=2.4
+paho-mqtt>=2.0
+cryptography>=42
+rapidfuzz>=3.6

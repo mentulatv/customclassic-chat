@@ -1,0 +1,11 @@
+# The bot's token goes in bot/.env as DISCORD_BOT_TOKEN=... (never committed).
+services:
+  ccchat-bot:
+    build:
+      context: ..
+      dockerfile: bot/Dockerfile
+    container_name: ccchat-bot
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - ./data:/data

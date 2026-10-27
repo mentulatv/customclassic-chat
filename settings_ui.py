@@ -18,7 +18,7 @@ BG, SIDE, CARD, FIELD = "#111827", "#0b1120", "#172033", "#0b1120"
 BORDER, ACCENT, ACCENT_HI = "#2a3654", "#3d6fd1", "#4f80e0"
 INK, SOFT, WARN = "#eef3fb", "#8f9db5", "#ffc24b"
 UI = "Segoe UI"
-PAGES = ["Appearance", "Position", "Chat", "Tabs", "Twitch", "Discord", "Guild setup", "Watch list"]
+PAGES = ["Appearance", "Position", "Chat", "Tabs", "Twitch", "Discord", "Guild setup", "Own setup", "Watch list"]
 
 
 # ------------------------------------------------------------------ widgets in one style
@@ -127,7 +127,7 @@ class SettingsWindow:
         self.content.pack_propagate(False)
         self.pages: dict[str, tk.Frame] = {}
         for name, build in zip(PAGES, (self.appearance, self.position, self.chat, self.tabs, self.twitch,
-                                       self.discord, self.guild_setup, self.watch_list)):
+                                       self.discord, self.guild_setup, self.own_setup, self.watch_list)):
             page = tk.Frame(self.content, bg=BG)
             label(page, name, size=15, bold=True, bg=BG).pack(fill="x", pady=(0, 14))
             build(page)
@@ -494,7 +494,23 @@ class SettingsWindow:
                                        "brings it back. Some guilds join with their name instead of a code.")
 
     def guild_setup(self, page) -> None:
-        """For whoever runs the guild's Discord: a guild for its members' apps, step by step."""
+        """For whoever runs the guild's Discord: the shared bot, the easy way (or the steps yourself)."""
+        invite = guild_relay.shared_bot_invite()
+        c = card(page, "The easy way: the CustomClassic Chat bot",
+                 "Add the bot to your Discord server, then type /chatsetup in the channel for guild chat. It makes "
+                 "the guild code and posts it there, players get it again with /guildcode, and members get the "
+                 "Discord tab. Nothing else to set up." if invite else
+                 "Coming soon: one bot that does all of this for you. Until then, set it up yourself.")
+        if invite:
+            button(c, "Add the CustomClassic Chat bot to your server",
+                   lambda: __import__("webbrowser").open(invite), primary=True).pack(anchor="w")
+        c = card(page, "Or set it up yourself", "With a webhook you make in the channel, and your own bot if you want "
+                                                "the Discord tab without the shared one. Your PC then keeps the guild "
+                                                "going for its members.")
+        button(c, "Set it up yourself…", lambda: self.show("Own setup")).pack(anchor="w")
+
+    def own_setup(self, page) -> None:
+        """A guild run from this PC: a webhook, optionally its own bot, and how members join."""
         app, opts, top = self.app, self.opts, self.top
         hook, bot, gname = tk.StringVar(), tk.StringVar(), tk.StringVar()
         by_name = tk.BooleanVar(value=False)
@@ -503,9 +519,9 @@ class SettingsWindow:
         f = entry(c, hook, 52)
         f.configure(show="•")  # a secret: anyone holding it can post in the channel
         f.pack(anchor="w", ipady=2)
-        c = card(page, "2. A bot (optional)", "For the Discord tab and !guildcode. discord.com/developers → New "
-                                              "Application → Bot: Reset Token and copy it, and switch on Message "
-                                              "Content Intent. The token stays on this PC.")
+        c = card(page, "2. Your own bot (optional)", "For the Discord tab and !guildcode without the shared bot: "
+                                                     "discord.com/developers → New Application → Bot, copy its token, "
+                                                     "switch on Message Content Intent. It stays on this PC.")
         row = tk.Frame(c, bg=CARD)
         row.pack(fill="x")
         f = entry(row, bot, 34)
