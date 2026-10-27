@@ -1,3 +1,5 @@
+<img src="docs/logo.png" alt="CustomClassic Chat: a customizable chat and smega blocker" width="460">
+
 # CustomClassic Chat
 
 **A customizable chat and smega blocker for MapleStory Classic World.**

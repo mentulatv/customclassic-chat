@@ -38,8 +38,11 @@ from dataclasses import dataclass, field
 from rapidfuzz import fuzz
 
 BROKERS = [("broker.emqx.io", 8883), ("broker.hivemq.com", 8883)]  # free public MQTT brokers, over TLS
-# the shared CustomClassic Chat bot (bot/ccchat_bot.py): its public application id, for its invite link
+# the shared CustomClassic Chat bot (bot/ccchat_bot.py): its public application id, for its invite link,
+# and the public half of the key it signs logins with (/chatlink), for every app to check them
 SHARED_BOT_ID = ""
+SHARED_BOT_KEY = ""
+LOGIN_PORT = 47321  # the magic link opens http://127.0.0.1:47321/login?t=…: this app, on this PC only
 ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # no 0/O or 1/I: easy to read out
 CODE = re.compile(r"^[A-Z2-9]{12}$")
 WEBHOOK = re.compile(r"^https://(?:canary\.|ptb\.)?discord(?:app)?\.com/api/webhooks/(\d{5,25})/([\w-]{20,120})$")
@@ -199,6 +202,42 @@ class Matcher:
         return ready
 
 
+# ------------------------------------------------------------------ logins (magic links from the bot)
+
+
+def _b64(data: bytes) -> str:
+    import base64
+    return base64.urlsafe_b64encode(data).decode().rstrip("=")
+
+
+def _unb64(text: str) -> bytes:
+    import base64
+    return base64.urlsafe_b64decode(text + "=" * (-len(text) % 4))
+
+
+def sign_login(private_key, claims: dict) -> str:
+    """A login, as the bot makes it: the claims (Discord user id and name, server, expiry), signed."""
+    body = _b64(json.dumps(claims, separators=(",", ":")).encode())
+    return body + "." + _b64(private_key.sign(body.encode()))
+
+
+def check_login(token: str, public_key: str = "", now: float | None = None) -> dict | None:
+    """The claims of a login the bot signed and that hasn't run out; None for anything else."""
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+    key = public_key or SHARED_BOT_KEY
+    if not key or not token or token.count(".") != 1:
+        return None
+    body, sig = token.split(".")
+    try:
+        Ed25519PublicKey.from_public_bytes(_unb64(key)).verify(_unb64(sig), body.encode())
+        claims = json.loads(_unb64(body))
+    except Exception:
+        return None
+    if not isinstance(claims, dict) or (now or time.time()) > float(claims.get("exp", 0)):
+        return None
+    return claims
+
+
 # ------------------------------------------------------------------ talking to Discord
 
 
@@ -247,7 +286,8 @@ class GuildPeer:
     reads the Discord channel for everyone."""
 
     def __init__(self, code: str, reader: str, put, share: bool, tab: bool, source: str = "guild",
-                 cfg: dict | None = None, admin: dict | None = None, connect=True, post=None, read=None):
+                 cfg: dict | None = None, admin: dict | None = None, connect=True, post=None, read=None,
+                 login: str = "", bot_key: str = ""):
         self.code, self.reader, self.put = code, reader, put
         self.share, self.tab, self.source = share, tab, source
         self.cfg = dict(cfg or {})  # the guild's details as last heard: name, webhook, webhook_id, channel_id
@@ -255,6 +295,8 @@ class GuildPeer:
         if admin:
             self.cfg = {k: admin[k] for k in ("name", "webhook", "webhook_id", "channel_id") if k in admin}
             self.cfg["has_bot"] = bool(admin.get("bot"))
+        self.login = login  # this app's signed login (from the magic link), for typing in the Guild tab
+        self.bot_key = bot_key  # the bot's public key (tests give their own)
         self.post = post or post_webhook
         self.read = read or read_channel
         self.seal = Seal(code)
@@ -313,11 +355,20 @@ class GuildPeer:
                 self.cfg = {"closed": True}
                 self.put(("status", "Guild chat to Discord: the guild's admin has closed this guild."))
             elif WEBHOOK.match(str(cfg.get("webhook", ""))) and cfg != self.cfg:
-                self.cfg = {k: str(cfg.get(k, ""))[:250] for k in ("name", "webhook", "webhook_id", "channel_id")}
+                self.cfg = {k: str(cfg.get(k, ""))[:250] for k in ("name", "webhook", "webhook_id", "channel_id",
+                                                                     "server_id")}
                 self.cfg["has_bot"] = bool(cfg.get("has_bot"))
                 self.put(("relay_cfg", (self.code, dict(self.cfg))))
         elif t == "hi":
             self.peers[str(msg.get("from"))] = {"at": now, "share": bool(msg.get("share")), "tab": bool(msg.get("tab"))}
+        elif t == "say" and self.tab:  # a member typed in their Guild tab
+            claims = check_login(str(msg.get("login", "")), self.bot_key, now)
+            server = self.cfg.get("server_id")
+            ok = bool(claims) and (not server or str(claims.get("server")) == server)
+            name = str(claims["name"] if ok else msg.get("name", "?"))[:32]
+            self.put(("msg", {"kind": "guildsay", "name": name + (" ✓" if ok else " (unverified)"),
+                              "body": clean(str(msg.get("text", ""))), "at": now, "time": time.strftime("%H:%M"),
+                              "to": None, "fg": None, "bg": None}))
         elif t == "discord" and self.tab:
             self.put(("msg", {"kind": "discord", "name": str(msg.get("author", "?"))[:32], "body": clean(str(msg.get("text", ""))),
                               "at": now, "time": time.strftime("%H:%M"), "to": None, "fg": None, "bg": None}))
@@ -330,6 +381,28 @@ class GuildPeer:
         if line and self.matcher.add(self.reader, line, time.time() if now is None else now):
             self.shared += 1
             self.say({"t": "read", "line": line})
+
+    def say_chat(self, text: str) -> str:
+        """Something typed in the Guild tab: to every member's Guild tab and the guild's Discord
+        channel. Returns '' when it went, or why it couldn't."""
+        claims = check_login(self.login, self.bot_key)
+        if not claims:
+            return "log in first: type /chatlink in your guild's Discord"
+        text = clean(text)[:400]
+        if not text:
+            return ""
+        self.say({"t": "say", "text": text, "login": self.login, "name": claims["name"]})
+        self.put(("msg", {"kind": "guildsay", "name": claims["name"] + " ✓", "body": text, "at": time.time(),
+                          "time": time.strftime("%H:%M"), "to": None, "fg": None, "bg": None}))
+        if self.cfg.get("webhook"):
+            threading.Thread(target=self._post_said, args=(claims["name"], text), daemon=True).start()
+        return ""
+
+    def _post_said(self, name: str, text: str) -> None:
+        try:
+            self.post(self.cfg["webhook"], f"{name} · app", text)
+        except Exception as e:
+            self.error = f"Discord refused a post ({e.__class__.__name__})"
 
     def decide(self, now: float | None = None) -> int:
         """Post the messages whose wait is over that are this app's to post."""

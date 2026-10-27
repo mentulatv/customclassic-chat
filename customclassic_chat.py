@@ -740,21 +740,50 @@ def make_chime(path: Path, notes, volume: float) -> None:
         w.writeframes(b"".join(struct.pack("<h", int(s / peak * volume * 32767)) for s in samples))
 
 
+# a generic maple leaf on a 100x100 grid (stem at the bottom), symmetric about x = 50
+LEAF_RIGHT = [(50, 4), (57, 19), (64, 15), (61, 37), (74, 25), (77, 32), (90, 29), (85, 44), (94, 50), (72, 64),
+              (75, 72), (54, 69), (54, 90)]
+LEAF = LEAF_RIGHT + [(100 - x, y) for x, y in reversed(LEAF_RIGHT)]
+ICON_SIZES = (16, 24, 32, 48, 64, 128, 256)
+
+
 def icon_image(size: int = 64):
-    """A blue speech bubble with three dots: the tray icon, and the shortcuts' icon."""
-    from PIL import Image, ImageDraw
-    img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    d, s = ImageDraw.Draw(img), size / 64
-    d.rounded_rectangle((3 * s, 7 * s, 61 * s, 46 * s), radius=11 * s, fill="#2f5597", outline="#9db1d3", width=max(1, round(2 * s)))
-    d.polygon([(15 * s, 44 * s), (12 * s, 59 * s), (29 * s, 45 * s)], fill="#2f5597")
-    for x in (19, 32, 45):
-        d.ellipse(((x - 4.5) * s, 22 * s, (x + 4.5) * s, 31 * s), fill="#ffffff")
-    return img
+    """The app's icon: a maple leaf on the blue chat bubble, with "CC" under it from 48 pixels up
+    (smaller, the letters would only blur). Drawn four times larger and shrunk, for smooth edges."""
+    from PIL import Image, ImageDraw, ImageFont
+    k = 4
+    s = size * k / 64
+    img = Image.new("RGBA", (size * k, size * k), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    d.polygon([(12.5 * s, 46 * s), (8.5 * s, 63.5 * s), (32 * s, 47.5 * s)], fill="#9db1d3")  # the tail's outline
+    d.rounded_rectangle((2 * s, 5 * s, 62 * s, 50 * s), radius=12 * s, fill="#2f5597", outline="#9db1d3",
+                        width=max(1, round(2 * s)))
+    d.polygon([(14 * s, 45 * s), (10.5 * s, 60 * s), (29.5 * s, 47 * s)], fill="#2f5597")  # bubble and tail: one shape
+    letters = size >= 48
+    x0, y0, x1, y1 = (17 * s, 7 * s, 47 * s, 37 * s) if letters else (12 * s, 7.5 * s, 52 * s, 47.5 * s)
+    d.polygon([(x0 + (x1 - x0) * x / 100, y0 + (y1 - y0) * y / 100) for x, y in LEAF], fill="#f28c28",
+              outline="#b44d12", width=max(1, round(1.2 * s)))
+    if letters:
+        font = None
+        for name in ("segoeuib.ttf", "arialbd.ttf", "verdanab.ttf"):
+            try:
+                font = ImageFont.truetype(name, round(15 * s))
+                break
+            except OSError:
+                pass
+        font = font or ImageFont.load_default()
+        w = d.textlength("CC", font=font)
+        d.text((32 * s - w / 2, 33 * s), "CC", font=font, fill="#ffffff", stroke_width=max(1, round(0.6 * s)),
+               stroke_fill="#1d3a6b")
+    return img.resize((size, size), Image.LANCZOS)
 
 
 def save_icon(path: Path) -> Path:
+    """The icon as a .ico, each size drawn for itself (the small ones without the letters)."""
     path.parent.mkdir(exist_ok=True)
-    icon_image(256).save(path, format="ICO", sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (256, 256)])
+    images = {n: icon_image(n) for n in ICON_SIZES}
+    images[256].save(path, format="ICO", sizes=[(n, n) for n in ICON_SIZES],
+                     append_images=[images[n] for n in ICON_SIZES if n != 256])
     return path
 
 
@@ -778,7 +807,7 @@ def start_tray(app):
         pystray.Menu.SEPARATOR,
         pystray.MenuItem("Quit", send("hotkey", HK_QUIT)),
     )
-    icon = pystray.Icon("CustomClassicChat", icon_image(), "CustomClassic Chat", menu)
+    icon = pystray.Icon("CustomClassicChat", icon_image(32), "CustomClassic Chat", menu)  # the tray shows it small
     threading.Thread(target=icon.run, daemon=True).start()
     return icon
 
