@@ -161,25 +161,24 @@ without logging in: no account, key or password, and it never writes in the chat
 
 ## Guild chat to Discord (opt-in, peer to peer)
 
-Your guild's chat in your guild's Discord channel, and that channel back in a **Discord** tab,
-with **no server of anyone's in between**: the members' own apps share the chat with each other.
+Your guild's chat in your guild's Discord channel, and that channel back in a **Guild** tab where
+members can type to it, with **no server of anyone's in between** for the chat: the members' own
+apps share it with each other.
 
-**Setting up (once, by whoever runs the guild's Discord):** *Settings → Guild setup*.
-1. A webhook for the channel: *Edit Channel → Integrations → Webhooks → New Webhook → Copy
-   Webhook URL*.
-2. Optionally a bot, for the Discord tab and `!guildcode`: discord.com/developers → New
-   Application → Bot, copy its token and switch on *Message Content Intent*. The app then offers
-   the link that adds the bot to your server (it only asks to read the channel). The token stays
-   on that PC.
-3. The guild's name, and how members join: with a **guild code** (`ABCD-EFGH-JKLM`, safer) or
-   with **the guild's name** (easier, but anyone who knows the name can read the shared chat and
-   post to the channel).
+**[Step-by-step guide, with pictures →](docs/guild-setup.md)**
 
-**Create** posts how to join in the channel. Players can also type `!guildcode` there while the
-admin's app runs with a bot.
+**Setting up (once, by whoever runs the guild's Discord):** *Settings → Guild setup → Add the
+CustomClassic Chat bot to your server* (choose **Add to Server**), then type `/chatsetup` in the
+channel for guild chat. Members join with a **guild code** (`ABCD-EFGH-JKLM`, safer) or with **the
+guild's name** (easier, less private). Guilds that would rather not use the shared bot can *Set it
+up yourself* with a webhook and, optionally, their own bot.
 
-**Joining:** *Settings → Discord*, enter the code (or name), then tick **Share my chat** and/or
-**Show the guild's Discord channel in a Discord tab**.
+**Joining:** `/guildcode` in the guild's Discord, then *Settings → Guild*: enter the code (or
+name), **Join**, and tick **Share my chat** and/or **Show a Guild tab**.
+
+**Typing in the Guild tab:** `/chatlink` in the guild's Discord gives a link that logs your app in
+as your Discord name (signed by the bot, so others see a ✓). Click the line at the bottom of the
+Guild tab, type, **Enter**.
 
 **How it works:** the apps meet on a channel at two free public message brokers (MQTT, the kind
 smart-home devices use), named and encrypted from the guild code: only members can find or read
@@ -189,9 +188,9 @@ same on every screen). After a few seconds every app has heard everyone's readin
 matches them up the same way (same minute, same speaker, nearly the same text) and agrees on the
 best wording (text recognition's slips, like "rn" for "m", lose) and on who posts it: the member
 with the lowest id among those who read it. That one app posts it; the others stay quiet. More
-members sharing means fewer gaps, never more copies. The admin's app keeps the guild's details
-on the channel for new members and, with a bot, reads the Discord channel for everyone's
-Discord tab.
+members sharing means fewer gaps, never more copies. The bot (or, in an own setup, the admin's
+app) keeps the guild's details on the channel for new members and reads the Discord channel for
+everyone's Guild tab.
 
 **What is sent:** only the one kind of chat chosen, with the speaker's name and the game's time
 stamp: guild chat, or, to try it before the game has guild chat, map chat or whispers (posts say
@@ -275,7 +274,7 @@ each chat line of a saved screenshot lands in. Tests: `python -m pytest`.
 
 ## Roadmap
 
-- **Chatting back**: logging in with Twitch or Discord to write in those chats from CustomClassic Chat
+- **Chatting back on Twitch**: logging in with Twitch to write in its chat from CustomClassic Chat (the guild's Discord already works, from the Guild tab)
 
 ## License
 

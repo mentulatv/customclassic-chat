@@ -14,7 +14,7 @@ sealed messages along, and with two of them one being down doesn't matter.
   same text) and agrees on its best wording and on who posts it: the member with the lowest
   id among those who saw it. That one app posts it to the webhook; the others stay quiet. So
   one message is one post, however many members read it.
-- The Discord tab: reading Discord takes a bot, and its token stays with the admin; the
+- The Guild tab: reading Discord takes a bot, and its token stays with the admin; the
   admin's app reads the channel and passes new messages along the same encrypted channel.
 
 Only the one kind of chat chosen to share is ever sent: guild chat (map chat or whispers only
@@ -281,7 +281,7 @@ def read_channel(bot_token: str, channel_id: str, after: str | None) -> list[dic
 
 class GuildPeer:
     """This app on the guild's channel: shares what it reads (if asked), takes part in deciding
-    who posts what, posts its share, and brings the Discord tab's messages (if asked). As the
+    who posts what, posts its share, and brings the Guild tab's messages (if asked). As the
     guild's admin (admin set) it also keeps the guild's details on the channel and, with a bot,
     reads the Discord channel for everyone."""
 
@@ -430,7 +430,7 @@ class GuildPeer:
 
     def read_discord(self, now: float) -> None:
         """The admin's app with a bot: new messages in the guild's channel (people's, not the
-        guild chat it relays) go out to the members' Discord tabs."""
+        guild chat it relays) go out to the members' Guild tabs."""
         if not (self.admin and self.admin.get("bot") and self.cfg.get("channel_id")) or not self.wanted_tab(now):
             return
         try:

@@ -18,7 +18,8 @@ BG, SIDE, CARD, FIELD = "#111827", "#0b1120", "#172033", "#0b1120"
 BORDER, ACCENT, ACCENT_HI = "#2a3654", "#3d6fd1", "#4f80e0"
 INK, SOFT, WARN = "#eef3fb", "#8f9db5", "#ffc24b"
 UI = "Segoe UI"
-PAGES = ["Appearance", "Position", "Chat", "Tabs", "Twitch", "Discord", "Guild setup", "Own setup", "Watch list"]
+PAGES = ["Appearance", "Position", "Chat", "Tabs", "Twitch", "Guild", "Guild setup", "Own setup", "Watch list"]
+GUIDE = "https://github.com/mentulatv/customclassic-chat/blob/main/docs/guild-setup.md"
 
 
 # ------------------------------------------------------------------ widgets in one style
@@ -133,7 +134,8 @@ class SettingsWindow:
             build(page)
             self.pages[name] = page
         self.page = None
-        self.show(self.opts.get("settings_page") if self.opts.get("settings_page") in PAGES else PAGES[0])
+        last = {"Discord": "Guild"}.get(self.opts.get("settings_page"), self.opts.get("settings_page"))  # renamed
+        self.show(last if last in PAGES else PAGES[0])
         top.bind("<Escape>", lambda e: top.destroy())
         self.place()
 
@@ -414,10 +416,10 @@ class SettingsWindow:
         tab = tk.BooleanVar(value=opts["relay_tab"])
         source = tk.StringVar(value=opts["relay_source"] if opts["relay_source"] in dict(guild_relay.SOURCES)
                               else "guild")
-        c = card(page, "Your guild's chat on Discord", "Members' apps share the guild's chat with each other "
-                                                       "directly (no server of anyone's in between) and post each "
-                                                       "message to the guild's Discord channel once. Only the one "
-                                                       "kind of chat picked below is sent. Off until you turn it on.")
+        c = card(page, "1. Join your guild", "Your guild's chat goes to its Discord channel, and the channel "
+                                             "comes to a Guild tab here. Get the code in your guild's Discord: "
+                                             "/guildcode there. Members' apps share it with each other directly, "
+                                             "and only the kind of chat picked below is sent.")
         row = tk.Frame(c, bg=CARD)
         row.pack(fill="x")
         label(row, "Guild code or name").pack(side="left")
@@ -447,7 +449,7 @@ class SettingsWindow:
             cfg = opts["relay_cfg"].get(key) or opts["relay_admin"].get(key) or {}
             peer = app.relay
             if not peer:
-                note.configure(text="Tick sharing or the Discord tab to join.", fg=SOFT)
+                note.configure(text="Tick sharing or the Guild tab to join.", fg=SOFT)
                 return
             online = peer.members()
             name = cfg.get("name") or peer.cfg.get("name")
@@ -456,7 +458,7 @@ class SettingsWindow:
             doing = (f" Sharing your {what}: {peer.shared} line{'s' if peer.shared != 1 else ''} shared, "
                      f"{peer.posted} posted by this app (another member's app may post the rest)."
                      if peer.share else " Not sharing.")
-            no_bot = (" The Discord tab stays empty: the guild's admin hasn't added a bot (Guild setup, step 2)."
+            no_bot = (" Discord messages won't show in the Guild tab: the guild's Discord has no bot."
                       if peer.tab and peer.cfg.get("webhook") and not peer.cfg.get("has_bot") else "")
             note.configure(text=where + f"{online} member{'s' if online != 1 else ''}' app{'s' if online != 1 else ''} "
                                 "online here." + doing + no_bot + (f" Problem: {peer.error}." if peer.error else ""),
@@ -478,7 +480,7 @@ class SettingsWindow:
         row.pack(fill="x", padx=(22, 0))
         for value, text in guild_relay.SOURCES:
             radio(row, text, source, value, use).pack(side="left", padx=(0, 12))
-        check(c, "Show the guild's Discord channel in a Discord tab", tab, use).pack(fill="x", pady=(4, 0))
+        check(c, "Show a Guild tab: the guild's Discord channel, and typing to it", tab, use).pack(fill="x", pady=(4, 0))
         waiting.pack(fill="x", pady=(6, 0))
         note.pack(fill="x", pady=(4, 0))
         show_waiting()
@@ -489,10 +491,10 @@ class SettingsWindow:
                 top.after(3000, tick)
         tick()
 
-        c = card(page, "Typing in the Guild tab", "Messages you type in the Guild tab carry your Discord name, "
-                                                  "signed by the CustomClassic Chat bot, so others see it's you (✓). "
-                                                  "To log in: type /chatlink in your guild's Discord and open the "
-                                                  "link it gives you, with this app running.")
+        c = card(page, "2. Log in to type in the Guild tab", "Type /chatlink in your guild's Discord and open the "
+                                                             "link it gives you, with this app running. What you "
+                                                             "type then carries your Discord name, and everyone "
+                                                             "sees it's really you (✓).")
         who = label(c, "", size=9)
         who.pack(fill="x")
 
@@ -510,26 +512,35 @@ class SettingsWindow:
             if app.relay:
                 app.relay.login = ""
             show_login()
-        button(c, "Log out", log_out).pack(anchor="w", pady=(6, 0))
+        out = button(c, "Log out", log_out)
         show_login()
-        label(page, "No code yet? Ask in your guild's Discord: /guildcode (or !guildcode) brings it back.",
-              soft=True, size=9, bg=BG).pack(fill="x")
+        if opts["guild_login"]:  # nothing to log out of otherwise
+            out.pack(anchor="w", pady=(6, 0))
+        row = tk.Frame(page, bg=BG)
+        row.pack(fill="x")
+        label(row, "Running your guild's Discord? Guild setup is done once, for everyone.", soft=True, size=9,
+              bg=BG).pack(side="left")
+        button(row, "Step-by-step guide", lambda: __import__("webbrowser").open(GUIDE)).pack(side="right")
 
     def guild_setup(self, page) -> None:
         """For whoever runs the guild's Discord: the shared bot, the easy way (or the steps yourself)."""
         invite = guild_relay.shared_bot_invite()
         c = card(page, "The easy way: the CustomClassic Chat bot",
-                 "Add the bot to your Discord server, then type /chatsetup in the channel for guild chat. It makes "
-                 "the guild code and posts it there, players get it again with /guildcode, and members get the "
-                 "Discord tab. Nothing else to set up." if invite else
+                 "For whoever runs the guild's Discord, once: 1. add the bot to your server, 2. type /chatsetup in "
+                 "the channel for guild chat, 3. tell members to type /guildcode there and put the code in "
+                 "Settings → Guild. Nothing else to set up, and no PC has to stay on." if invite else
                  "Coming soon: one bot that does all of this for you. Until then, set it up yourself.")
         if invite:
             button(c, "Add the CustomClassic Chat bot to your server",
                    lambda: __import__("webbrowser").open(invite), primary=True).pack(anchor="w")
         c = card(page, "Or set it up yourself", "With a webhook you make in the channel, and your own bot if you want "
-                                                "the Discord tab without the shared one. Your PC then keeps the guild "
+                                                "the Guild tab without the shared one. Your PC then keeps the guild "
                                                 "going for its members.")
         button(c, "Set it up yourself…", lambda: self.show("Own setup")).pack(anchor="w")
+        row = tk.Frame(page, bg=BG)
+        row.pack(fill="x")
+        label(row, "Pictures of each step, and what members do:", soft=True, size=9, bg=BG).pack(side="left")
+        button(row, "Step-by-step guide", lambda: __import__("webbrowser").open(GUIDE)).pack(side="right")
 
     def own_setup(self, page) -> None:
         """A guild run from this PC: a webhook, optionally its own bot, and how members join."""
@@ -541,7 +552,7 @@ class SettingsWindow:
         f = entry(c, hook, 52)
         f.configure(show="•")  # a secret: anyone holding it can post in the channel
         f.pack(anchor="w", ipady=2)
-        c = card(page, "2. Your own bot (optional)", "For the Discord tab and !guildcode without the shared bot: "
+        c = card(page, "2. Your own bot (optional)", "For the Guild tab and !guildcode without the shared bot: "
                                                      "discord.com/developers → New Application → Bot, copy its token, "
                                                      "switch on Message Content Intent. It stays on this PC.")
         row = tk.Frame(c, bg=CARD)
@@ -617,12 +628,12 @@ class SettingsWindow:
             hook.set("")
             bot.set("")
             app.set_relay(key, opts["relay_share"], opts["relay_tab"])
-            self.discord_code.set(guild_relay.key_label(key))  # the Discord page shows the new guild too
+            self.discord_code.set(guild_relay.key_label(key))  # the Guild page shows the new guild too
             top.clipboard_clear()
             top.clipboard_append(guild_relay.key_label(key))
             made.configure(text=f"Done. Members join with {guild_relay.key_label(key)} (copied); how to join is posted "
                                 "in the channel. Keep this app running now and then: it keeps the guild's details "
-                                "on the channel for new members" + (", and reads Discord for the Discord tab." if
+                                "on the channel for new members" + (", and reads Discord for the Guild tab." if
                                                                      out.get("bot") else "."), fg=INK)
 
         def create():

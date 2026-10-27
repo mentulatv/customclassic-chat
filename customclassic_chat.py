@@ -74,7 +74,7 @@ DEFAULTS = {
     "relay_code": "",         # opt in: the guild's code (guild chat to Discord peer to peer, the channel back)
     "relay_share": False,     # share the guild chat this app reads with the guild's other apps
     "relay_source": "guild",  # what's shared: "guild"; "map" or "whisper" only to test before the game has guild chat
-    "relay_tab": False,       # the guild's Discord channel in a Discord tab
+    "relay_tab": False,       # the guild's Discord channel in the Guild tab
     "relay_reader": "",       # this install's random id among the guild's apps (no name)
     "relay_cfg": {},          # guild code -> the guild's details as last heard (its name and Discord webhook)
     "relay_admin": {},        # guild code -> guilds set up from here: name, webhook, and the Discord bot token if any
@@ -428,7 +428,7 @@ def custom_name(custom: dict | None) -> str | None:
 def tabs_for(custom: dict | None, twitch: bool = False, twitch_in_all: bool = False,
              discord: bool = False) -> list[tuple[str, set]]:
     """The tabs: the fixed ones, a Twitch tab after Mega when a channel is set (its chat in All
-    too if asked), a Discord tab for the guild relay's channel, and the custom tab before Watch
+    too if asked), a Guild tab for the guild relay's channel, and the custom tab before Watch
     when it's on. Map chat brings the lines of no known chat type along, as All does."""
     tabs = [(n, k | {"twitch"} if n == "All" and twitch and twitch_in_all else k) for n, k in TABS]
     if twitch:
@@ -2229,7 +2229,7 @@ class ChatPanel(ChatView):
         return "guild" in reader.Config.load().colors
 
     def start_relay(self) -> None:
-        """Join the guild's channel set in Settings: when sharing, showing the Discord tab, or as
+        """Join the guild's channel set in Settings: when sharing, showing the Guild tab, or as
         the guild's admin (whose app keeps the guild's details there and reads Discord for all)."""
         if self.relay:
             self.relay.stop()

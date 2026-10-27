@@ -10,7 +10,7 @@ What it does, for each Discord server that invites it:
   /chatlink    gives whoever asks, privately, a link that logs their CustomClassic Chat in as their
                Discord name, signed by the bot, so they can type in the app's Guild tab and every
                member's app can check it's really them.
-  The Discord tab: people's messages in a set-up channel are passed, sealed, to the members' apps.
+  The Guild tab: people's messages in a set-up channel are passed, sealed, to the members' apps.
   (!guildcode typed in the channel gets the same answer as /guildcode, in the channel.)
 
 It never sees game chat in the clear: it only seals and publishes on the guild channels it set up.
@@ -180,7 +180,7 @@ def guild_key_for(store: Store, name: str, by_name: bool) -> str:
 
 
 def should_pass_on(message, row) -> bool:
-    """A Discord message for the members' Discord tabs: a person's, with words, not the guild's own relayed chat."""
+    """A Discord message for the members' Guild tabs: a person's, with words, not the guild's own relayed chat."""
     return bool(message.content) and not message.author.bot and str(message.webhook_id or "") != row["webhook_id"]
 
 
@@ -192,7 +192,7 @@ def make_bot(store: Store, channels: Channels, key=None):
     from discord import app_commands
 
     intents = discord.Intents.default()
-    intents.message_content = True  # the Discord tab: needs "Message Content Intent" switched on for the bot
+    intents.message_content = True  # the Guild tab: needs "Message Content Intent" switched on for the bot
     client = discord.Client(intents=intents)
     tree = app_commands.CommandTree(client)
 
