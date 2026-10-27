@@ -136,6 +136,8 @@ class Channels:
                 c = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="ccbot-" + uuid.uuid4().hex[:16])
                 c.tls_set(cert_reqs=ssl.CERT_REQUIRED)
                 c.reconnect_delay_set(2, 60)
+                c.on_connect = lambda cl, u, f, rc, p=None, h=host: log.info("relay %s: connected (%s)", h, rc)
+                c.on_disconnect = lambda cl, u, f, rc, p=None, h=host: log.warning("relay %s: disconnected (%s)", h, rc)
                 c.connect_async(host, port, 30)
                 c.loop_start()
                 self.clients.append(c)
@@ -152,7 +154,9 @@ class Channels:
         if not self.clients:
             self.sent.append((topic, blob))
         for c in self.clients:
-            c.publish(topic, blob, qos=1, retain=retain)
+            info = c.publish(topic, blob, qos=1, retain=retain)
+            if info.rc:
+                log.warning("relay: a %s message wasn't sent (%s)", data.get("t"), info.rc)
 
     def put_cfg(self, row) -> None:
         self.say(row["key"], {"t": "cfg", "cfg": cfg_of(row)}, sub="cfg", retain=True)
@@ -210,6 +214,10 @@ def make_bot(store: Store, channels: Channels, key=None):
                 log.warning("command sync for %s failed: %s", guild.id, e)
         for row in store.all():
             channels.put_cfg(row)
+            channel = client.get_channel(int(row["channel_id"]))
+            if channel is None or not channel.permissions_for(channel.guild.me).view_channel:
+                log.warning("can't see %s's channel %s: its Discord messages won't reach the Guild tabs",
+                            row["name"], row["channel_id"])
 
     @client.event
     async def on_guild_join(guild):
@@ -227,6 +235,13 @@ def make_bot(store: Store, channels: Channels, key=None):
         if not isinstance(channel, discord.TextChannel):
             await interaction.response.send_message("Run this in the text channel where guild chat should go.",
                                                     ephemeral=True)
+            return
+        can = channel.permissions_for(channel.guild.me)
+        if not (can.view_channel and can.read_message_history and can.send_messages):
+            await interaction.response.send_message(
+                "I can't see this channel, so Discord messages here wouldn't reach the members' Guild tabs. "
+                "Edit Channel → Permissions → add CustomClassic Chat → allow View Channel, Send Messages and "
+                "Read Message History, then /chatsetup again.", ephemeral=True)
             return
         old = store.by_channel(str(channel.id))
         if old:
@@ -295,12 +310,15 @@ def make_bot(store: Store, channels: Channels, key=None):
     async def on_message(message):
         row = store.by_channel(str(message.channel.id))
         if not row or message.author == client.user:
+            if not message.author.bot:
+                log.info("message in a channel that isn't set up (%s)", message.channel.id)
             return
         if message.content.strip().lower() in ("!guildcode", "!guild code", "!ccchat"):
             await message.channel.send(gr.join_text(row["key"]))
             return
         if should_pass_on(message, row):
             channels.discord_message(row["key"], message.author.display_name, message.content)
+            log.info("passed on a message in %s", row["name"])
         else:  # why a message in a set-up channel didn't go to the Guild tabs (never what it says)
             log.info("not passed on in %s: words=%s bot=%s webhook=%s", row["name"], bool(message.content),
                      message.author.bot, message.webhook_id)
