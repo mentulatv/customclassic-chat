@@ -102,6 +102,24 @@ class Overlay:
         user32.SetWindowLongW(self.hwnd, GWL_EXSTYLE, style)
         self.keep_on_top(again=False)
 
+    def take_keyboard(self) -> None:
+        """Let this window have the keyboard for a moment (typing in it): it normally never takes
+        it, so the game keeps it. give_back() hands it to whichever window had it before."""
+        user32.GetForegroundWindow.restype = wintypes.HWND
+        self._before = user32.GetForegroundWindow()
+        style = user32.GetWindowLongW(self.hwnd, GWL_EXSTYLE)
+        user32.SetWindowLongW(self.hwnd, GWL_EXSTYLE, style & ~WS_EX_NOACTIVATE & ~WS_EX_TRANSPARENT)
+        user32.SetForegroundWindow(self.hwnd)
+        self.root.focus_force()
+
+    def give_back(self) -> None:
+        style = user32.GetWindowLongW(self.hwnd, GWL_EXSTYLE)
+        user32.SetWindowLongW(self.hwnd, GWL_EXSTYLE, style | WS_EX_NOACTIVATE)
+        before = getattr(self, "_before", None)
+        if before and before != self.hwnd:
+            user32.SetForegroundWindow(before)
+        self._before = None
+
     def keep_on_top(self, again: bool = True) -> None:
         if not self.root.winfo_exists():  # closed (a pop-up note): stop
             return

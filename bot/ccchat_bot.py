@@ -7,6 +7,9 @@ What it does, for each Discord server that invites it:
                details on the guild's encrypted channel for members' apps to pick up.
   /guildcode   tells whoever asks the guild code, privately.
   /chatstop    (admin) closes the guild: members' apps stop sharing, the webhook is removed.
+  /chatlink    gives whoever asks, privately, a link that logs their CustomClassic Chat in as their
+               Discord name, signed by the bot, so they can type in the app's Guild tab and every
+               member's app can check it's really them.
   The Discord tab: people's messages in a set-up channel are passed, sealed, to the members' apps.
   (!guildcode typed in the channel gets the same answer as /guildcode, in the channel.)
 
@@ -34,6 +37,7 @@ import guild_relay as gr  # noqa: E402
 
 log = logging.getLogger("ccchat-bot")
 REPUBLISH_S = 600  # each guild's details are put on its channel again this often (brokers can forget)
+LOGIN_DAYS = 90  # a /chatlink login lasts this long; then /chatlink again
 INVITE_PERMISSIONS = 1024 + 2048 + 65536 + 536870912  # view channel, send, read history, manage webhooks
 
 
@@ -85,9 +89,38 @@ class Store:
 
 
 def cfg_of(row) -> dict:
-    """A guild's details as members' apps take them (the same fields an admin's app sends)."""
+    """A guild's details as members' apps take them (the same fields an admin's app sends, and its
+    Discord server, so a login only counts in the guild it came from)."""
     return {"name": row["name"], "webhook": row["webhook"], "webhook_id": row["webhook_id"],
-            "channel_id": row["channel_id"], "has_bot": True}
+            "channel_id": row["channel_id"], "server_id": row["server_id"], "has_bot": True}
+
+
+def signing_key(path: Path):
+    """The bot's key for signing logins: made on the first start, kept in the data folder (never
+    leaves it). Its public half goes into the app (guild_relay.SHARED_BOT_KEY)."""
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    if path.exists():
+        key = serialization.load_pem_private_key(path.read_bytes(), password=None)
+    else:
+        key = Ed25519PrivateKey.generate()
+        path.write_bytes(key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+                                           serialization.NoEncryption()))
+        path.chmod(0o600)
+    return key
+
+
+def public_key_text(key) -> str:
+    from cryptography.hazmat.primitives import serialization
+    return gr._b64(key.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw))
+
+
+def login_link(key, user_id: str, name: str, server_id: str, now: float | None = None) -> str:
+    """The magic link: opens the person's own CustomClassic Chat (on their PC) with their login."""
+    now = time.time() if now is None else now
+    token = gr.sign_login(key, {"uid": user_id, "name": name[:32], "server": server_id, "iat": int(now),
+                                "exp": int(now + LOGIN_DAYS * 86400)})
+    return f"http://127.0.0.1:{gr.LOGIN_PORT}/login?t={token}"
 
 
 class Channels:
@@ -154,7 +187,7 @@ def should_pass_on(message, row) -> bool:
 # ------------------------------------------------------------------ the bot
 
 
-def make_bot(store: Store, channels: Channels):
+def make_bot(store: Store, channels: Channels, key=None):
     import discord
     from discord import app_commands
 
@@ -230,6 +263,17 @@ def make_bot(store: Store, channels: Channels):
         await interaction.response.send_message(f"**{here['name']}** (<#{here['channel_id']}>): " + gr.join_text(here["key"]),
                                                 ephemeral=True)
 
+    @tree.command(name="chatlink", description="Log your CustomClassic Chat in as you, to type in its Guild tab.")
+    @app_commands.guild_only()
+    async def chatlink(interaction: discord.Interaction):
+        if key is None:
+            await interaction.response.send_message("Logins aren't switched on for this bot.", ephemeral=True)
+            return
+        link = login_link(key, str(interaction.user.id), interaction.user.display_name, str(interaction.guild_id))
+        await interaction.response.send_message(
+            f"With CustomClassic Chat running on this PC, open this link to log it in as **{interaction.user.display_name}** "
+            f"(for {LOGIN_DAYS} days): {link}\nIt's yours alone: don't share it.", ephemeral=True)
+
     @tree.command(name="chatstop", description="Stop CustomClassic Chat in this channel: members' apps stop sharing.")
     @app_commands.default_permissions(manage_webhooks=True)
     @app_commands.guild_only()
@@ -290,8 +334,11 @@ def main() -> None:
     token = os.environ.get("DISCORD_BOT_TOKEN", "").strip()
     if not token:
         sys.exit("Set DISCORD_BOT_TOKEN (in bot/.env): the bot's token from discord.com/developers.")
-    store = Store(Path(os.environ.get("DATA_DIR", HERE / "data")) / "bot.sqlite3")
-    make_bot(store, Channels()).run(token, log_handler=None)
+    data = Path(os.environ.get("DATA_DIR", HERE / "data"))
+    store = Store(data / "bot.sqlite3")
+    key = signing_key(data / "signing.pem")
+    log.info("login key (public half, for guild_relay.SHARED_BOT_KEY): %s", public_key_text(key))
+    make_bot(store, Channels(), key).run(token, log_handler=None)
 
 
 if __name__ == "__main__":

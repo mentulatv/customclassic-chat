@@ -489,9 +489,31 @@ class SettingsWindow:
                 top.after(3000, tick)
         tick()
 
-        c = card(page, "No code yet?", "Ask in your guild's Discord: the code was posted there when the guild was "
-                                       "set up, and if the guild has the bot, typing !guildcode in the channel "
-                                       "brings it back. Some guilds join with their name instead of a code.")
+        c = card(page, "Typing in the Guild tab", "Messages you type in the Guild tab carry your Discord name, "
+                                                  "signed by the CustomClassic Chat bot, so others see it's you (✓). "
+                                                  "To log in: type /chatlink in your guild's Discord and open the "
+                                                  "link it gives you, with this app running.")
+        who = label(c, "", size=9)
+        who.pack(fill="x")
+
+        def show_login():
+            claims = guild_relay.check_login(opts["guild_login"]) if opts["guild_login"] else None
+            if claims:
+                days = max(0, int((claims["exp"] - __import__("time").time()) // 86400))
+                who.configure(text=f"Logged in as {claims['name']} ✓ ({days} days left).", fg=INK)
+            else:
+                who.configure(text="Not logged in." if not opts["guild_login"] else
+                              "Your login has run out: /chatlink again.", fg=SOFT)
+
+        def log_out():
+            app.set_opt("guild_login", "")
+            if app.relay:
+                app.relay.login = ""
+            show_login()
+        button(c, "Log out", log_out).pack(anchor="w", pady=(6, 0))
+        show_login()
+        label(page, "No code yet? Ask in your guild's Discord: /guildcode (or !guildcode) brings it back.",
+              soft=True, size=9, bg=BG).pack(fill="x")
 
     def guild_setup(self, page) -> None:
         """For whoever runs the guild's Discord: the shared bot, the easy way (or the steps yourself)."""

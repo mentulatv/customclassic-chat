@@ -78,6 +78,7 @@ DEFAULTS = {
     "relay_reader": "",       # this install's random id among the guild's apps (no name)
     "relay_cfg": {},          # guild code -> the guild's details as last heard (its name and Discord webhook)
     "relay_admin": {},        # guild code -> guilds set up from here: name, webhook, and the Discord bot token if any
+    "guild_login": "",        # this app's login from the bot's magic link (/chatlink): to type in the Guild tab
     "tab": "All",
     "settings_page": "Appearance",  # the settings section open last
     "menu_close_s": 10,       # the right-click menu closes after this many seconds (0: stays until clicked away)
@@ -96,7 +97,7 @@ TABS = [("All", {"map", "whisper", "party", "buddy", "guild", "other", "system",
 CUSTOM_KINDS = [("map", "Map chat"), ("whisper", "Whispers"), ("party", "Party"), ("buddy", "Buddy"), ("guild", "Guild"),
                 ("twitch", "Twitch chat"), ("discord", "Discord"),
                 ("mega", "Megaphones"), ("system", "System messages"), ("watch", "Watch list catches")]
-COLORS = {"guild": "#ffb547", "discord": "#8ea1f0", "twitch": "#bf94ff", "map": "#ffffff", "whisper": "#00ff00", "party": "#ff8fc7", "buddy": "#ff9900", "other": "#c8d2e4",
+COLORS = {"guild": "#ffb547", "discord": "#8ea1f0", "guildsay": "#9fe3b8", "twitch": "#bf94ff", "map": "#ffffff", "whisper": "#00ff00", "party": "#ff8fc7", "buddy": "#ff9900", "other": "#c8d2e4",
           "mega": "#f2a7cf", "system": "#ffafaf", "status": "#ffc24b"}  # the game's own where measured; notes in amber
 # the game's own pop-ups that appear over the chat box: CustomClassic Chat steps aside while one is up
 POPUP = re.compile(r"(?i)\b(?:party|guild|alliance|family)\s+invit\w*\s+from\b|\b(?:trade|friend|buddy)\s+request\s+from\b"
@@ -432,8 +433,8 @@ def tabs_for(custom: dict | None, twitch: bool = False, twitch_in_all: bool = Fa
     tabs = [(n, k | {"twitch"} if n == "All" and twitch and twitch_in_all else k) for n, k in TABS]
     if twitch:
         tabs.insert(5, ("Twitch", {"twitch", "status"}))
-    if discord:
-        tabs.insert(len(tabs) - 1, ("Discord", {"discord", "status"}))
+    if discord:  # the guild's own tab: its Discord channel, what members type here, and the game's guild chat
+        tabs.insert(len(tabs) - 1, ("Guild", {"discord", "guildsay", "guild", "status"}))
     name = custom_name(custom)
     if name:
         picked = set(custom.get("kinds") or [])
@@ -787,6 +788,42 @@ def save_icon(path: Path) -> Path:
     return path
 
 
+def login_listener(events: queue.Queue) -> None:
+    """The magic link from the bot (/chatlink) opens http://127.0.0.1:47321/login?t=… in the
+    browser: this answers it, on this PC only, and hands the login (if the bot really signed it)
+    to the app."""
+    import http.server
+    import urllib.parse
+
+    class Answer(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            url = urllib.parse.urlparse(self.path)
+            token = urllib.parse.parse_qs(url.query).get("t", [""])[0]
+            claims = guild_relay.check_login(token) if url.path == "/login" else None
+            if claims:
+                events.put(("login", token))
+                text = (f"CustomClassic Chat is logged in as {claims['name']}. You can close this tab and type in "
+                        "the Guild tab.")
+            else:
+                text = "That link isn't a working login (it may have run out). Type /chatlink in Discord for a new one."
+            page = ("<!doctype html><meta charset=utf-8><title>CustomClassic Chat</title>"
+                    "<body style='font:16px Segoe UI,sans-serif;background:#111827;color:#eef3fb;padding:40px'>"
+                    f"<p>{text}</p>").encode()
+            self.send_response(200 if claims else 400)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(page)))
+            self.end_headers()
+            self.wfile.write(page)
+
+        def log_message(self, *args):
+            pass
+
+    try:
+        http.server.HTTPServer(("127.0.0.1", guild_relay.LOGIN_PORT), Answer).serve_forever()
+    except OSError:
+        events.put(("status", "Logins: port 47321 is taken, so /chatlink links can't reach this app."))
+
+
 def start_tray(app):
     """An icon in the taskbar's notification area: left click shows or hides the panel, right
     click opens the menu. It never takes the keyboard from the game, as a taskbar button would."""
@@ -1062,6 +1099,16 @@ class ChatView:
         self.grip = None           # the ≡ grip being dragged: (screen y it started at, extra then, rect then)
         self.drag = None           # moving or resizing in adjust mode
         self._where = None
+        import tkinter as tk
+        self.typed = tk.StringVar()
+        self.input = tk.Entry(self.msgs.root, textvariable=self.typed, bg="#0b1120", fg=INK, insertbackground=INK,
+                              relief="flat", highlightthickness=1, highlightbackground="#2a3654",
+                              highlightcolor="#3d6fd1", disabledbackground="#0b1120", disabledforeground=SOFT)
+        self.input.bind("<Button-1>", self.start_typing)
+        self.input.bind("<Return>", self.send_typed)
+        self.input.bind("<Escape>", lambda e: self.stop_typing())
+        self.input.bind("<FocusOut>", lambda e: self.stop_typing())
+        self.typing = False
 
     @property
     def hwnds(self) -> set:
@@ -1326,8 +1373,59 @@ class ChatView:
     # drawing ----------------------------------------------------------------
 
     def render(self) -> None:
+        self.place_input()
         self.render_strip()
         self.render_messages()
+
+    # the typing line (the Guild tab) ----------------------------------------------
+
+    def input_shown(self) -> bool:
+        return self.log.tab == "Guild" and getattr(self.app, "relay", None) is not None
+
+    def input_height(self) -> int:
+        return max(20, round(self.line * 1.2)) if self.input_shown() else 0
+
+    def place_input(self) -> None:
+        if not self.input_shown():
+            self.input.place_forget()
+            return
+        logged = guild_relay.check_login(self.opts["guild_login"]) if self.opts["guild_login"] else None
+        self.input.configure(font=self.font, state="normal" if logged else "disabled")
+        if not self.typing and not self.typed.get():
+            self.input.configure(fg=SOFT)
+            self.typed.set(f"Message the guild as {logged['name']}… (click, type, Enter)" if logged else
+                           "To type here, log in: /chatlink in your guild's Discord")
+            self.placeholder = True
+        self.input.place(x=0, rely=1.0, anchor="sw", relwidth=1.0, width=-self.bar_px, height=self.input_height())
+
+    def start_typing(self, e=None) -> None:
+        if str(self.input.cget("state")) == "disabled":
+            return
+        if getattr(self, "placeholder", False):
+            self.typed.set("")
+            self.placeholder = False
+        self.input.configure(fg=INK)
+        self.typing = True
+        self.msgs.take_keyboard()  # the keyboard comes here until Enter or Esc
+        self.input.focus_set()
+
+    def stop_typing(self) -> None:
+        if not self.typing:
+            return
+        self.typing = False
+        self.msgs.give_back()  # and goes back to the game
+        if not self.typed.get():
+            self.place_input()
+
+    def send_typed(self, e=None) -> None:
+        text = self.typed.get().strip()
+        if text and self.app.relay:
+            problem = self.app.relay.say_chat(text)
+            if problem:
+                self.app.events.put(("status", f"Not sent: {problem}."))
+            else:
+                self.typed.set("")
+        self.stop_typing()
 
     def render_strip(self) -> None:
         c, h = self.strip.canvas, self.strip.height
@@ -1361,7 +1459,7 @@ class ChatView:
         b, pad = self.bar_px, 6
         shown = self.log.visible()
         end = len(shown) - self.scroll
-        y, fits = h - 2, 0
+        y, fits = h - 2 - self.input_height(), 0  # above the typing line on the Guild tab
         for m in reversed(shown[:max(0, end)]):
             star = "★ " if m.get("watch") and self.log.tab != "Watch" else ""
             t = c.create_text(pad, 0, anchor="nw", text=star + line_text(m, self.opts["timestamps"]),
@@ -1624,6 +1722,8 @@ class ChatPanel(ChatView):
             save_settings(opts)
         self.relay = None
         self.start_relay()
+        if not demo:
+            threading.Thread(target=login_listener, args=(self.events,), daemon=True).start()
         threading.Thread(target=overlay.hotkey_thread, args=(self.events, HOTKEYS), daemon=True).start()
         threading.Thread(target=demo_loop if demo else read_loop, args=(self,), daemon=True).start()
         self.tray = start_tray(self)
@@ -1933,6 +2033,12 @@ class ChatPanel(ChatView):
                     changed = True
                 elif kind == "settings":
                     self.open_settings()
+                elif kind == "login":  # the magic link: this app is logged in as its Discord name
+                    self.opts["guild_login"] = data
+                    save_settings(self.opts)
+                    if self.relay:
+                        self.relay.login = data
+                    changed = True
                 elif kind == "relay_cfg":  # the guild's details, heard on its channel: kept for next time
                     code, cfg = data
                     self.opts["relay_cfg"] = {**self.opts["relay_cfg"], code: cfg}
@@ -2115,7 +2221,7 @@ class ChatPanel(ChatView):
         if code and (o["relay_share"] or o["relay_tab"] or admin) and not self.demo:
             self.relay = guild_relay.GuildPeer(code, o["relay_reader"], self.events.put, o["relay_share"],
                                                o["relay_tab"], o["relay_source"], cfg=o["relay_cfg"].get(code),
-                                               admin=admin)
+                                               admin=admin, login=o["guild_login"])
 
     def set_relay(self, code: str, share: bool, tab: bool, source: str | None = None) -> None:
         self.opts["relay_code"] = guild_relay.guild_key(code)
