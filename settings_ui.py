@@ -452,8 +452,13 @@ class SettingsWindow:
             online = peer.members()
             name = cfg.get("name") or peer.cfg.get("name")
             where = f"Guild {name}: " if name else "Waiting for the guild's details from its admin's app… "
+            what = dict(guild_relay.SOURCES)[peer.source].split(" (")[0].lower()
+            doing = (f" Sharing your {what}: {peer.shared} line{'s' if peer.shared != 1 else ''} shared, "
+                     f"{peer.posted} posted by this app (another member's app may post the rest)."
+                     if peer.share else " Not sharing.")
             note.configure(text=where + f"{online} member{'s' if online != 1 else ''}' app{'s' if online != 1 else ''} "
-                                "online here.", fg=SOFT)
+                                "online here." + doing + (f" Problem: {peer.error}." if peer.error else ""),
+                           fg=WARN if peer.error else SOFT)
 
         def use(*_):
             key = guild_relay.guild_key(code.get())
@@ -464,7 +469,6 @@ class SettingsWindow:
             code.set(guild_relay.key_label(key))
             show_waiting()
             note.configure(text="Joining…" if app.relay else "", fg=SOFT)
-            top.after(5000, lambda: top.winfo_exists() and show_status())
         button(row, "Join", use).pack(side="left")
         field.bind("<Return>", use)
         check(c, "Share my chat:", share, use).pack(fill="x", pady=(8, 0))
@@ -476,7 +480,12 @@ class SettingsWindow:
         waiting.pack(fill="x", pady=(6, 0))
         note.pack(fill="x", pady=(4, 0))
         show_waiting()
-        show_status()
+
+        def tick():  # the status kept current while the window is open
+            if top.winfo_exists():
+                show_status()
+                top.after(3000, tick)
+        tick()
 
         c = card(page, "No code yet?", "Ask in your guild's Discord: the code was posted there when the guild was "
                                        "set up, and if the guild has the bot, typing !guildcode in the channel "
@@ -544,6 +553,12 @@ class SettingsWindow:
                                                                      out.get("bot") else "."), fg=INK)
 
         def create():
+            current = guild_relay.guild_key(opts["relay_code"])
+            if current in opts["relay_admin"] and not made.cget("text").startswith("You already"):
+                made.configure(text=f"You already run the guild {opts['relay_admin'][current].get('name', '')} "
+                                    f"({guild_relay.key_label(current)}). Press Create again to make another one "
+                                    "anyway; members of the old one stay on the old one.", fg=WARN)
+                return
             if len(gname.get().strip()) < 2 or not hook.get().strip():
                 made.configure(text="Paste the webhook link and type the guild's name.", fg=WARN)
                 return

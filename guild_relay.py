@@ -259,6 +259,8 @@ class GuildPeer:
         self.seen: deque = deque(maxlen=500)  # envelope ids: each message comes from both brokers
         self.peers: dict[str, dict] = {}  # reader -> {at, share, tab}: who's around
         self.discord_after: str | None = None
+        self.shared = self.posted = 0  # this session: lines this app shared, messages it posted
+        self.error = ""  # the last thing that went wrong posting, to show in Settings
         self.clients: list = []
         self.stopped = threading.Event()
         if connect:
@@ -322,19 +324,26 @@ class GuildPeer:
         """A line this app read: shared, if it's the chosen kind and sharing is on."""
         line = relay_line(msg, self.source) if self.share and not self.cfg.get("closed") else None
         if line and self.matcher.add(self.reader, line, time.time() if now is None else now):
+            self.shared += 1
             self.say({"t": "read", "line": line})
 
     def decide(self, now: float | None = None) -> int:
         """Post the messages whose wait is over that are this app's to post."""
         sent = 0
         for p in self.matcher.due(time.time() if now is None else now):
-            if p.poster() != self.reader or not self.cfg.get("webhook"):
+            if p.poster() != self.reader:
+                continue
+            if not self.cfg.get("webhook"):
+                self.error = "the guild's Discord details haven't arrived yet (from its admin's app)"
                 continue
             try:
                 self.post(self.cfg["webhook"], f"{p.speaker} · {p.kind}", p.best())
                 sent += 1
-            except Exception:
-                pass  # Discord down or the webhook gone: lost, the relay goes on
+                self.posted += 1
+                self.error = ""
+            except Exception as e:  # Discord down or the webhook gone: lost, the relay goes on, and says so
+                self.error = f"Discord refused a post ({e.__class__.__name__})"
+                self.put(("status", f"Guild chat to Discord: {self.error}."))
         return sent
 
     def wanted_tab(self, now: float) -> bool:
