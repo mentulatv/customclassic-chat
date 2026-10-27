@@ -252,6 +252,7 @@ class GuildPeer:
         self.admin = admin  # the admin's own: the same, plus the bot token (never sent anywhere)
         if admin:
             self.cfg = {k: admin[k] for k in ("name", "webhook", "webhook_id", "channel_id") if k in admin}
+            self.cfg["has_bot"] = bool(admin.get("bot"))
         self.post = post or post_webhook
         self.read = read or read_channel
         self.seal = Seal(code)
@@ -311,6 +312,7 @@ class GuildPeer:
                 self.put(("status", "Guild chat to Discord: the guild's admin has closed this guild."))
             elif WEBHOOK.match(str(cfg.get("webhook", ""))) and cfg != self.cfg:
                 self.cfg = {k: str(cfg.get(k, ""))[:250] for k in ("name", "webhook", "webhook_id", "channel_id")}
+                self.cfg["has_bot"] = bool(cfg.get("has_bot"))
                 self.put(("relay_cfg", (self.code, dict(self.cfg))))
         elif t == "hi":
             self.peers[str(msg.get("from"))] = {"at": now, "share": bool(msg.get("share")), "tab": bool(msg.get("tab"))}
@@ -416,6 +418,27 @@ def join_text(key: str) -> str:
            f"the guild's name, **{key_label(key)}**")
     return (f"To bring your guild chat here and this channel into your game overlay: in CustomClassic Chat, "
             f"Settings → Discord, enter {how}, then tick what you want to share or see.")
+
+
+def check_bot(token: str, channel_id: str) -> str:
+    """The bot's name, once Discord confirms the token works and the bot can read the guild's
+    channel; ValueError saying what to do otherwise."""
+    import httpx
+    headers = {"Authorization": f"Bot {token.strip()}"}
+    try:
+        me = httpx.get(f"{DISCORD_API}/users/@me", headers=headers, timeout=10)
+        if me.status_code == 401:
+            raise ValueError("That isn't a working bot token: copy it again (Bot → Reset Token).")
+        me.raise_for_status()
+        seen = httpx.get(f"{DISCORD_API}/channels/{channel_id}/messages?limit=1", headers=headers, timeout=10)
+    except httpx.HTTPError:
+        raise ValueError("Discord couldn't be reached. Try again in a minute.")
+    if seen.status_code in (403, 404):
+        raise ValueError("The bot can't see the channel yet: add it to your server with the button, and let it "
+                         "view that channel.")
+    if seen.status_code != 200:
+        raise ValueError(f"Discord said no ({seen.status_code}).")
+    return me.json().get("global_name") or me.json().get("username") or "the bot"
 
 
 def bot_invite(token: str) -> str:

@@ -456,8 +456,10 @@ class SettingsWindow:
             doing = (f" Sharing your {what}: {peer.shared} line{'s' if peer.shared != 1 else ''} shared, "
                      f"{peer.posted} posted by this app (another member's app may post the rest)."
                      if peer.share else " Not sharing.")
+            no_bot = (" The Discord tab stays empty: the guild's admin hasn't added a bot (Guild setup, step 2)."
+                      if peer.tab and peer.cfg.get("webhook") and not peer.cfg.get("has_bot") else "")
             note.configure(text=where + f"{online} member{'s' if online != 1 else ''}' app{'s' if online != 1 else ''} "
-                                "online here." + doing + (f" Problem: {peer.error}." if peer.error else ""),
+                                "online here." + doing + no_bot + (f" Problem: {peer.error}." if peer.error else ""),
                            fg=WARN if peer.error else SOFT)
 
         def use(*_):
@@ -519,6 +521,39 @@ class SettingsWindow:
             else:
                 invite.pack_forget()
         bot.trace_add("write", show_invite)
+        current = guild_relay.guild_key(opts["relay_code"])
+        mine = opts["relay_admin"].get(current)
+        bot_note = label(c, "", soft=True, size=9, wrap=470)
+        if mine:  # a guild run from here: its bot can be added or changed without making a new guild
+            def bot_checked(out):
+                if isinstance(out, Exception):
+                    bot_note.configure(text=str(out), fg=WARN)
+                    return
+                opts["relay_admin"][current] = {**mine, "bot": bot.get().strip()}
+                app.set_opt("relay_admin", opts["relay_admin"])
+                app.start_relay()
+                bot.set("")
+                bot_note.configure(text=f"{out} now reads the channel for {mine.get('name', 'the guild')}'s Discord "
+                                        "tab, and answers !guildcode, while this app runs.", fg=INK)
+
+            def use_bot():
+                if not bot.get().strip():
+                    bot_note.configure(text="Paste the bot's token first.", fg=WARN)
+                    return
+                bot_note.configure(text="Checking the bot with Discord…", fg=SOFT)
+
+                def work():
+                    try:
+                        out = guild_relay.check_bot(bot.get(), mine.get("channel_id", ""))
+                    except Exception as e:  # shown as it is
+                        out = e
+                    top.after(0, lambda: top.winfo_exists() and bot_checked(out))
+                threading.Thread(target=work, daemon=True).start()
+            button(row, f"Use this bot for {mine.get('name', 'the guild')}", use_bot, primary=True).pack(
+                side="left", padx=(8, 0))
+            if mine.get("bot"):
+                bot_note.configure(text="This guild has a bot. Paste another token to change it.")
+        bot_note.pack(fill="x", pady=(4, 0))
         c = card(page, "3. The guild", "")
         row = tk.Frame(c, bg=CARD)
         row.pack(fill="x")
