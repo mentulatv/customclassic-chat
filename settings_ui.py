@@ -431,8 +431,9 @@ class SettingsWindow:
 
         def show_waiting():
             if source.get() == "guild" and not app.guild_colour_known():
-                waiting.configure(text="The game doesn't have guild chat yet, so nothing is shared as guild chat. "
-                                       "To try it meanwhile, share map chat or whispers.")
+                waiting.configure(text="The game doesn't have guild chat yet. This app already looks for it in "
+                                       "old MapleStory's guild purple, and shares it once it shows up. To try it "
+                                       "meanwhile, share map chat or whispers.")
             elif source.get() != "guild":
                 kind = dict(guild_relay.SOURCES)[source.get()].split(" (")[0].lower()
                 waiting.configure(text=f"Testing: your {kind} goes to the guild's Discord, labelled as such. "

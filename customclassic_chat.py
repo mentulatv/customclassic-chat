@@ -97,7 +97,7 @@ TABS = [("All", {"map", "whisper", "party", "buddy", "guild", "other", "system",
 CUSTOM_KINDS = [("map", "Map chat"), ("whisper", "Whispers"), ("party", "Party"), ("buddy", "Buddy"), ("guild", "Guild"),
                 ("twitch", "Twitch chat"), ("discord", "Discord"),
                 ("mega", "Megaphones"), ("system", "System messages"), ("watch", "Watch list catches")]
-COLORS = {"guild": "#ffb547", "discord": "#8ea1f0", "guildsay": "#9fe3b8", "twitch": "#bf94ff", "map": "#ffffff", "whisper": "#00ff00", "party": "#ff8fc7", "buddy": "#ff9900", "other": "#c8d2e4",
+COLORS = {"guild": "#c8b4ff", "discord": "#8ea1f0", "guildsay": "#9fe3b8", "twitch": "#bf94ff", "map": "#ffffff", "whisper": "#00ff00", "party": "#ff8fc7", "buddy": "#ff9900", "other": "#c8d2e4",
           "mega": "#f2a7cf", "system": "#ffafaf", "status": "#ffc24b"}  # the game's own where measured; notes in amber
 # the game's own pop-ups that appear over the chat box: CustomClassic Chat steps aside while one is up
 POPUP = re.compile(r"(?i)\b(?:party|guild|alliance|family)\s+invit\w*\s+from\b|\b(?:trade|friend|buddy)\s+request\s+from\b"
@@ -2223,10 +2223,10 @@ class ChatPanel(ChatView):
             self.twitch = twitch_chat.TwitchChat(channel, self.events.put)
 
     def guild_colour_known(self) -> bool:
-        """Whether guild chat has a colour of its own (config.toml [colors] guild): only then is it
-        told apart from buddy chat, and only then is anything shared with a guild relay."""
+        """Whether guild chat's colour is the game's real one (set in reader.py once the game has
+        guild chat, or in config.toml [colors] guild), not old MapleStory's purple standing in."""
         import reader
-        return "guild" in reader.Config.load().colors
+        return reader.GUILD_CONFIRMED or reader.Config.load().colors.get("guild") != reader.COLORS["guild"]
 
     def start_relay(self) -> None:
         """Join the guild's channel set in Settings: when sharing, showing the Guild tab, or as

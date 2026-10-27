@@ -397,7 +397,12 @@ def test_guild_chat_switches_on_with_its_colour_alone():
     import guild_relay
     import reader
     cfg = reader.Config()
-    cfg.colors = {**cfg.colors, "guild": [180, 120, 255]}  # the one value to add when the game has guild chat
+    # old MapleStory's guild purple stands in until the game has guild chat; nothing else is near it
+    assert reader._nearest([196, 184, 250], cfg.colors, cfg.color_tolerance) == "guild"
+    for name in ("general", "notice", "buddy_guild", "whisper"):
+        for rgb in (cfg.colors[name] if isinstance(cfg.colors[name][0], list) else [cfg.colors[name]]):
+            assert reader._nearest(rgb, cfg.colors, cfg.color_tolerance) != "guild", name
+    cfg.colors = {**cfg.colors, "guild": [180, 120, 255]}  # the one value to change when the game has guild chat
     assert reader._nearest([182, 118, 250], cfg.colors, cfg.color_tolerance) == "guild"
     line = SimpleNamespace(source="guild", band=False, text="[18:49] Rowan : zakum at 8?")
     [m] = mc.messages_from([line], mc.Dedupe(), 0.0)

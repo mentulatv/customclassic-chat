@@ -38,6 +38,7 @@ WHISPER = re.compile(r"^\W{0,3}(?:\[\s?\d{1,2}\s?[:.;]\s?\d{2}\s?\]\s*)?[A-Za-z0
 
 REREAD_BELOW = 0.8  # lines read with less confidence get their row OCR'd again on its own
 
+GUILD_CONFIRMED = False  # the guild colour below is a stand-in until the game has guild chat
 FIND_SCALE = 1.5  # zoom for finding the chat box in the lower game window (reading the chat itself uses `scale`)
 
 
@@ -50,9 +51,10 @@ COLORS = {  # the text colour of each chat type; a type may list several
     "item_megaphone": [[9, 69, 76], [70, 39, 6]],
     "super_megaphone": [119, 0, 66],
     "buddy_guild": [255, 153, 0],
-    # guild chat: not in the game yet. When it is, its text colour goes here (one screenshot with a few
-    # guild lines measures it), and guild chat becomes its own kind, shareable with a guild relay:
-    # "guild": [r, g, b],
+    # guild chat: not in the game yet. Until it is, this is old MapleStory's guild purple, measured from
+    # old screenshots (so only roughly): guild chat in that colour is picked up as soon as it shows up.
+    # When it's out, measure the real one and set GUILD_CONFIRMED (or set guild in config.toml).
+    "guild": [200, 180, 255],
     "whisper": [0, 255, 0],
     "notice": [[255, 175, 175], [255, 255, 0]],  # system text: pink, yellow
     "general": [255, 255, 255],  # map chat

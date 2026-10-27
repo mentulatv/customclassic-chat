@@ -196,8 +196,10 @@ everyone's Guild tab.
 stamp: guild chat, or, to try it before the game has guild chat, map chat or whispers (posts say
 which). Never anything else, and nothing is ever typed into the game. Ask your guild first.
 
-> The game doesn't have guild chat yet. When it does, guild chat needs one thing: its text colour
-> (`guild = [r, g, b]` under `[colors]`), measured from one screenshot. Everything else is ready.
+> The game doesn't have guild chat yet. Until it does, CustomClassic Chat looks for it in old
+> MapleStory's guild purple, so it's picked up the day it shows up if the colour stayed the same.
+> If it didn't, the real colour (`guild = [r, g, b]` under `[colors]`), measured from one
+> screenshot, is the one thing left to set.
 
 ## Watch list
 
