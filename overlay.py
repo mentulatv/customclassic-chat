@@ -82,6 +82,7 @@ class Overlay:
         self.canvas.bind("<B1-Motion>", self._drag)
         self.edit = self.hidden = self.typing = False
         self.through = click_through
+        self.below = None  # another Overlay this one stays right behind (a backdrop), instead of on top
         self._grab = None
         self.root.update_idletasks()
         self.hwnd = user32.GetAncestor(self.root.winfo_id(), 2)  # GA_ROOT
@@ -132,7 +133,8 @@ class Overlay:
     def keep_on_top(self, again: bool = True) -> None:
         if not self.root.winfo_exists():  # closed (a pop-up note): stop
             return
-        user32.SetWindowPos(self.hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE)
+        after = self.below.hwnd if self.below else HWND_TOPMOST
+        user32.SetWindowPos(self.hwnd, after, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE)
         if again:
             self.root.after(2000, self.keep_on_top)
 

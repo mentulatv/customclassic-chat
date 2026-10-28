@@ -54,6 +54,7 @@ DEFAULTS = {
     "keep_hours": 12,         # chat history kept between restarts, in hours; 0 keeps it forever
     "timestamps": "seconds",  # "seconds" [18:16:05], "minutes" [18:16] or "off"
     "opacity": 1.0,           # the panel's opacity when ◐ is off
+    "solid_text": True,       # below full opacity only the background fades: the text stays solid, with a shadow
     "panel_bg": None,         # background colour; None: CustomClassic Chat's dark blue
     "colors": {},             # text colour per chat type (map, whisper, party, buddy, system, mega); empty: the game's
     "see_through": False,     # ◐ clicked on: the messages see-through and click-through until clicked off
@@ -118,6 +119,12 @@ def chat_menu_open(read) -> bool:
 
 PANEL, STRIP, TAB, TAB_ON, INK, SOFT, DOT = "#111827", "#0b1120", "#1c2740", "#2f5597", "#eef3fb", "#8f9db5", "#ff4b4b"
 WARN = "#ffc24b"
+SHADOW = "#000000"  # behind solid text (pure black: the see-through colour is a near-black of its own)
+
+
+def overlay_key() -> str:
+    import overlay
+    return overlay.KEY_COLOR
 GOLD = "#ffd24a"  # the watch list's star and dot
 ADJUST, ADJUST_EDGE = "#2f6fe0", "#9fc2ff"  # adjust mode: the banner, the outline and corner handles
 SB_TRACK, SB_BUTTON, SB_ARROW, SB_THUMB, SB_EDGE = "#e3e8ef", "#a9c8ee", "#1f4f8f", "#8ea3c2", "#5b7fb4"  # as the game's
@@ -1098,12 +1105,24 @@ class ChatView:
             w.canvas.configure(bg=self.opts["panel_bg"] or PANEL)
             w.canvas.bind("<MouseWheel>", self.on_wheel)
         self.strip.canvas.configure(bg=STRIP)
+        # the messages' backdrop: with solid text, the background (and megaphone bands, scrollbar) is
+        # drawn here and fades, while the text window in front stays solid with a see-through background.
+        # Clicks between the lines land here, so it answers them the same way.
+        self.back = overlay.Overlay(f"{title} backdrop", 40, 40, 400, 100, master=self.msgs.root, click_through=False)
+        self.back.below = self.msgs
+        self.back.keep_on_top(again=False)
+        self.back.canvas.configure(bg=self.opts["panel_bg"] or PANEL)
+        self.back.show(False)
+        for w in (self.msgs, self.back):
+            w.canvas.bind("<ButtonPress-1>", self.on_press)
+            w.canvas.bind("<B1-Motion>", self.on_drag)
+            w.canvas.bind("<ButtonRelease-1>", self.on_release)
+        self.back.canvas.bind("<MouseWheel>", self.on_wheel)
+        self.back.canvas.bind("<Motion>", self.on_motion)
+        self.back.canvas.bind("<ButtonRelease-3>", self.menu)
         self.strip.canvas.bind("<ButtonPress-1>", self.on_strip_click)
         self.strip.canvas.bind("<B1-Motion>", self.on_grip_drag)
         self.strip.canvas.bind("<ButtonRelease-1>", self.on_grip_release)
-        self.msgs.canvas.bind("<ButtonPress-1>", self.on_press)
-        self.msgs.canvas.bind("<B1-Motion>", self.on_drag)
-        self.msgs.canvas.bind("<ButtonRelease-1>", self.on_release)
         for w in (self.msgs, self.strip):
             w.canvas.bind("<Motion>", self.on_motion)
             w.canvas.bind("<ButtonRelease-3>", self.menu)  # on release: letting go can't pick an item
@@ -1127,11 +1146,17 @@ class ChatView:
 
     @property
     def hwnds(self) -> set:
-        return {self.msgs.hwnd, self.strip.hwnd}
+        return {self.msgs.hwnd, self.strip.hwnd, self.back.hwnd}
 
     def show(self, visible: bool) -> None:
         self.msgs.show(visible or self.msgs.edit)
         self.strip.show(visible or self.msgs.edit)
+        self.back.show(visible and self.solid())
+
+    def solid(self) -> bool:
+        """Solid text: the text window in front, its background faded on the backdrop behind it
+        (not while adjusting, which shows the window as one solid piece)."""
+        return bool(self.opts["solid_text"]) and not self.msgs.edit
 
     def set_edit(self, on: bool) -> bool:
         """Adjust mode on or off; True when it was just ended (time to keep the new place)."""
@@ -1154,6 +1179,7 @@ class ChatView:
         self._where = where
         self.strip.place(r["left"], r["top"], r["width"], sh)
         self.msgs.place(r["left"], r["top"] + sh, r["width"], max(sh, r["height"] - sh))
+        self.back.place(r["left"], r["top"] + sh, r["width"], max(sh, r["height"] - sh))
         self.render()
 
     def panel_now(self) -> dict:
@@ -1232,10 +1258,18 @@ class ChatView:
         """◐ on: the messages see-through, and clicks go to whatever is below. The tab strip
         stays solid and clickable, so ◐ can always be clicked off again."""
         on = bool(self.see_through) and not self.msgs.edit
-        self.msgs.set_alpha(self.opts["peek_alpha"] if on else self.opts["opacity"])
+        solid = self.solid()
+        fade = self.opts["peek_alpha"] if on else self.opts["opacity"]
+        self.msgs.set_alpha(fade if on or not solid else 1.0)
+        self.back.set_alpha(fade)
         self.strip.set_alpha(self.opts["opacity"])
-        self.msgs.through = on
-        self.msgs.click_through(on)
+        bg = self.opts["panel_bg"] or PANEL
+        self.msgs.canvas.configure(bg=overlay_key() if solid else bg)
+        self.back.canvas.configure(bg=bg)
+        self.back.show(solid and not self.msgs.hidden)
+        for w in (self.msgs, self.back):
+            w.through = on
+            w.click_through(on)
 
     # the tab strip ----------------------------------------------------------
 
@@ -1510,6 +1544,9 @@ class ChatView:
     def render_messages(self) -> None:
         c, w, h = self.msgs.canvas, self.msgs.width, self.msgs.height
         c.delete("all")
+        solid = self.solid()
+        bgc = self.back.canvas if solid else c  # backgrounds: on the backdrop with solid text
+        bgc.delete("all")
         b, pad = self.bar_px, 6
         shown = self.log.visible()
         end = len(shown) - self.scroll
@@ -1521,9 +1558,13 @@ class ChatView:
                               font=self.font, width=w - 2 * pad - b)
             th = c.bbox(t)[3]
             c.move(t, 0, y - th)
+            if solid:  # a shadow, so solid text reads over whatever shows through behind it
+                shade = c.create_text(pad + 1, y - th + 1, anchor="nw", text=c.itemcget(t, "text"), fill=SHADOW,
+                                      font=self.font, width=w - 2 * pad - b)
+                c.tag_lower(shade, t)
             if m.get("bg"):  # a megaphone's band, as the game draws it
-                band = c.create_rectangle(0, y - th, w - b - 1, y, fill=m["bg"], outline="")
-                c.tag_lower(band)
+                band = bgc.create_rectangle(0, y - th, w - b - 1, y, fill=m["bg"], outline="")
+                bgc.tag_lower(band)
             if m.get("watch"):  # caught by the watch list: a gold edge
                 c.create_rectangle(0, y - th, 2, y - 1, fill=GOLD, outline="")
             y -= th
@@ -1531,7 +1572,7 @@ class ChatView:
                 break
             fits += 1
         self.in_view = max(1, fits)
-        self.render_scrollbar(c, w, h, b, len(shown))
+        self.render_scrollbar(bgc, w, h, b, len(shown))
 
     def render_scrollbar(self, c, w: int, h: int, b: int, total: int) -> None:
         """The game's scrollbar, lying over the game's own: a dark divider, a light track, arrow
@@ -2211,8 +2252,8 @@ class ChatPanel(ChatView):
         if key == "panel_bg":
             self.opts["panel_bg"] = chosen
             for v in [self, *self.windows]:
-                for w in (v.msgs, v.strip):
-                    w.canvas.configure(bg=chosen)
+                v.strip.canvas.configure(bg=chosen)
+            self.apply_see_through()  # the messages' background, on whichever window draws it
         else:
             self.opts["colors"] = {**self.opts["colors"], key: chosen}
         self.set_opt(key if key == "panel_bg" else "colors", self.opts[key if key == "panel_bg" else "colors"])
@@ -2220,8 +2261,8 @@ class ChatPanel(ChatView):
     def reset_colours(self) -> None:
         self.opts["colors"], self.opts["panel_bg"] = {}, None
         for v in [self, *self.windows]:
-            v.msgs.canvas.configure(bg=PANEL)
             v.strip.canvas.configure(bg=STRIP)
+        self.apply_see_through()
         save_settings(self.opts)
         self.render()
 

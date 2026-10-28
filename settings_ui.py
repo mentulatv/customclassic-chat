@@ -185,6 +185,14 @@ class SettingsWindow:
         slider(c, opacity, 30, 100, set_opacity, "%").pack(fill="x", pady=(0, 6))
         label(c, "See-through with ◐", soft=True, size=9).pack(fill="x")
         slider(c, see, 50, 95, set_see, "%").pack(fill="x")
+        solid = tk.BooleanVar(value=opts["solid_text"])
+
+        def set_solid():
+            app.set_opt("solid_text", solid.get())
+            app.apply_see_through()
+            app.render()
+        check(c, "Keep the text solid: only the background fades (the text gets a shadow)", solid,
+              set_solid).pack(fill="x", pady=(8, 0))
 
         c = card(page, "Colours", "Click a colour to change it. The text colours start as the game's own.")
         grid = tk.Frame(c, bg=CARD)
