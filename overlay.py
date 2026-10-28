@@ -31,6 +31,7 @@ if user32:
     user32.GetAncestor.restype = wintypes.HWND
     user32.GetAncestor.argtypes = [wintypes.HWND, ctypes.c_uint]
     user32.GetForegroundWindow.restype = wintypes.HWND
+    user32.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
     user32.SetWindowLongPtrW.restype = ctypes.c_void_p
     user32.SetWindowLongPtrW.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_void_p]
     user32.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int,
@@ -104,7 +105,9 @@ class Overlay:
 
     def place(self, x: float, y: float, width: float, height: float) -> None:
         x, y, width, height = (int(round(v)) for v in (x, y, width, height))  # Tk takes whole pixels only
-        if (x, y, width, height) != (self.root.winfo_x(), self.root.winfo_y(), self.width, self.height):
+        r = wintypes.RECT()  # where Windows really has it (Tk's own idea can lag behind a new window)
+        user32.GetWindowRect(self.hwnd, ctypes.byref(r))
+        if (x, y, width, height) != (r.left, r.top, r.right - r.left, r.bottom - r.top) or                 (width, height) != (self.width, self.height):
             self.width, self.height = width, height
             self.root.geometry(f"{width}x{height}+{x}+{y}")
 

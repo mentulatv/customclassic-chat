@@ -2646,6 +2646,12 @@ class ChatPanel(ChatView):
             if host.msgs.edit:  # split while adjusting: it joins in
                 ChatView.set_edit(w, True)
                 host.render()
+
+            def again():  # once the new windows are up, put them in place once more
+                if w in self.windows:
+                    w._where = None
+                    host.place(host.placed())
+            self.root.after(150, again)
         save_settings(self.opts)
         self.settings_changed()
 
