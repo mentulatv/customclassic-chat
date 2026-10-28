@@ -14,7 +14,7 @@ HOOK = "https://discord.com/api/webhooks/123456789012/" + "a" * 40
 
 def test_setting_up_a_guild_and_members_hearing_it(tmp_path):
     store, channels = b.Store(tmp_path / "bot.sqlite3"), b.Channels(connect=False)
-    key = b.guild_key_for(store, "Nimbus", by_name=False)
+    key = b.guild_key_for(store)
     store.add("server-1", "chan-1", key, "Nimbus", HOOK, "123456789012")
     channels.put_cfg(store.by_channel("chan-1"))
     got = []
@@ -30,14 +30,12 @@ def test_setting_up_a_guild_and_members_hearing_it(tmp_path):
     assert not other.cfg.get("webhook")
 
 
-def test_names_as_codes_are_first_come(tmp_path):
+def test_only_guild_codes_join(tmp_path):
     store = b.Store(tmp_path / "bot.sqlite3")
-    assert b.guild_key_for(store, "Nimbus", by_name=True) == "name:nimbus"
-    store.add("s", "c", "name:nimbus", "Nimbus", HOOK, "42")
-    with pytest.raises(ValueError):
-        b.guild_key_for(store, "nimbus", by_name=True)
-    with pytest.raises(ValueError):
-        b.guild_key_for(store, "two words", by_name=True)
+    key = b.guild_key_for(store)
+    assert gr.guild_code(key) == key  # a fresh code, never a guild's name
+    assert gr.guild_key("Nimbus") == "" and gr.guild_key("name:nimbus") == ""
+    assert gr.guild_key(" abcd efgh jkmn ") == "ABCD-EFGH-JKMN"
 
 
 def test_closing_and_what_goes_to_the_tab(tmp_path):

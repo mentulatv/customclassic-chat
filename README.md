@@ -182,14 +182,14 @@ apps share it with each other.
 
 **[Step-by-step guide, with pictures →](docs/guild-setup.md)**
 
-**Setting up (once, by whoever runs the guild's Discord):** *Settings → Guild setup → Add the
-CustomClassic Chat bot to your server* (choose **Add to Server**), then type `/chatsetup` in the
-channel for guild chat. Members join with a **guild code** (`ABCD-EFGH-JKLM`, safer) or with **the
-guild's name** (easier, less private). Guilds that would rather not use the shared bot can *Set it
-up yourself* with a webhook and, optionally, their own bot.
+**Setting up (once, by the server's admins):** *Settings → Guild setup → Add the CustomClassic
+Chat bot to your server* (choose **Add to Server**), then type `/bind` in the channel for guild
+chat. The bot makes the **guild code** (`ABCD-EFGH-JKLM`) and posts and pins it there. Only admins
+can `/bind` and `/unbind`. Guilds that would rather not use the shared bot can use *Own guild
+setup* (Advanced) with a webhook and, optionally, their own bot.
 
-**Joining:** `/guildcode` in the guild's Discord, then *Settings → Guild ↔ Discord*: enter the code (or
-name), **Join**, and tick **Share my chat** and/or **Show a Guild tab**.
+**Joining:** the pinned post or `/guildcode` in the guild's Discord, then *Settings → Guild ↔
+Discord*: enter the code, **Join**, and tick **Share my chat** and/or **Show a Guild tab**.
 
 **Typing in the Guild tab:** `/chatlink` in the guild's Discord gives a link that logs your app in
 as your Discord name (signed by the bot, so others see a ✓). Click the line at the bottom of the

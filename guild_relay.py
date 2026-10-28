@@ -68,23 +68,15 @@ def guild_code(text: str) -> str:
     return f"{t[:4]}-{t[4:8]}-{t[8:]}" if CODE.match(t) and all(c in ALPHABET for c in t) else ""
 
 
-GUILD_NAME = re.compile(r"^[A-Za-z0-9]{2,16}$")  # MapleStory guild names: letters and digits
-
-
 def guild_key(text: str) -> str:
-    """What a member typed to join, as the key their app uses: a guild code (ABCD-EFGH-JKLM), or,
-    for guilds whose admin chose it, the guild's name ("name:mapleguild"); '' for neither."""
-    code = guild_code(text)
-    if code:
-        return code
-    t = (text or "").strip()
-    t = t[5:] if t.lower().startswith("name:") else t
-    return f"name:{t.lower()}" if GUILD_NAME.match(t) else ""
+    """What a member typed to join, as the key their app uses: the guild code (ABCD-EFGH-JKLM),
+    or '' when it isn't one."""
+    return guild_code(text)
 
 
 def key_label(key: str) -> str:
-    """How a key shows in Settings: the code, or the guild's name."""
-    return key[5:] if key.startswith("name:") else key
+    """How a key shows in Settings."""
+    return key
 
 
 class Seal:
@@ -511,10 +503,9 @@ class GuildPeer:
 
 
 def join_text(key: str) -> str:
-    how = (f"the guild code **{key}**" if not key.startswith("name:") else
-           f"the guild's name, **{key_label(key)}**")
     return (f"To bring your guild chat here and this channel into your game overlay: in CustomClassic Chat, "
-            f"Settings → Guild ↔ Discord, enter {how}, then tick what you want to share or see.")
+            f"Settings → Guild ↔ Discord, enter the guild code **{key}**, then tick what you want to share "
+            f"or see.")
 
 
 def check_bot(token: str, channel_id: str) -> str:
@@ -543,7 +534,7 @@ def shared_bot_invite() -> str:
     if not SHARED_BOT_ID:
         return ""
     return (f"https://discord.com/oauth2/authorize?client_id={SHARED_BOT_ID}&scope=bot%20applications.commands"
-            "&permissions=536939520")  # view channel, send, read history, manage webhooks
+            "&permissions=536947712")  # view channel, send, read history, manage webhooks, pin (manage messages)
 
 
 def bot_invite(token: str) -> str:
@@ -560,15 +551,11 @@ def bot_invite(token: str) -> str:
     return f"https://discord.com/oauth2/authorize?client_id={bot_id}&scope=bot&permissions=66560"  # view + history
 
 
-def create_guild(name: str, webhook: str, bot: str = "", by_name: bool = False) -> dict:
-    """The admin's new guild: {code, name, webhook, webhook_id, channel_id, bot}. Its code is a
-    new random one, or (by_name) the guild's own name: easier to share, but anyone who knows the
-    name can join. The webhook is checked with Discord, and how to join goes to the channel.
-    Raises ValueError."""
-    if by_name and not GUILD_NAME.match(name.strip()):
-        raise ValueError("To join by the guild's name, type it as it is in the game (letters and digits).")
+def create_guild(name: str, webhook: str, bot: str = "") -> dict:
+    """The admin's new guild: {code, name, webhook, webhook_id, channel_id, bot}, with a new random
+    code. The webhook is checked with Discord, and how to join goes to the channel. Raises ValueError."""
     info = check_webhook(webhook)
-    key = guild_key(name) if by_name else new_code()
+    key = new_code()
     guild = {"code": key, "name": name.strip()[:40], "webhook": webhook.strip(), "bot": bot.strip(), **info}
     post_webhook(guild["webhook"], "CustomClassic Chat", f"Guild chat relay set up for **{clean(name)[:40]}**. "
                  + join_text(key))

@@ -8,15 +8,16 @@ into CustomClassic Chat as a **Guild** tab, where members can type to it too.
 
 There are two parts:
 
-- **[For the guild leader](#for-the-guild-leader-once)**: done once, in Discord, takes a minute.
+- **[For the server's admins](#for-the-servers-admins-once)**: done once, in Discord, takes a minute.
 - **[For every member](#for-members)**: put in the code, and optionally log in to type.
 
 ---
 
-## For the guild leader (once)
+## For the server's admins (once)
 
-You need permission to manage the Discord server (to add a bot), and a text channel for guild
-chat, for example `#guild`. If it's a private channel, give the bot **View Channel**, **Send Messages** and **Read Message History** there after adding it.
+You need to be an admin of the Discord server, and a text channel for guild chat, for example
+`#guild`. If it's a private channel, give the bot **View Channel**, **Send Messages**, **Read
+Message History** and **Manage Messages** (to pin the code) there after adding it.
 
 1. **Add the bot.** In CustomClassic Chat: *Settings → Guild setup → Add the CustomClassic Chat bot
    to your server*. Pick your server and choose **Add to Server**. Don't choose *Add to My Apps*:
@@ -24,24 +25,19 @@ chat, for example `#guild`. If it's a private channel, give the bot **View Chann
 
    ![Settings → Guild setup](settings-guild-setup.png)
 
-2. **Set up the channel.** In the guild chat channel, type `/chatsetup`. It asks for:
-   - **guild_name**: your guild's name in the game.
-   - **join_with** (optional): `code` (the default, safer) or `name`.
-     - **code:** members join with a code like `ABCD-EFGH-JKLM`.
-     - **name:** members join with the guild's name. That's easier, but anyone who knows the name
-       can read the shared chat and post to the channel.
+2. **Bind the bot to the channel.** In the guild chat channel, type `/bind` and your guild's name
+   in the game. The bot makes the guild code (like `ABCD-EFGH-JKLM`), then posts and pins in the
+   channel how to join. Only the server's admins can `/bind` and `/unbind`.
 
-   The bot makes a webhook for the channel and a guild code, and posts in the channel how to
-   join. `/chatsetup` and `/chatstop` are for members who can manage webhooks.
-
-3. **Tell your members.** Point them at that post, or at `/guildcode` (the bot answers only
-   whoever asks), then at [For members](#for-members) below.
+3. **That's it for members:** the pinned post has the code, and `/guildcode` gives it to anyone
+   who asks (only they see the answer). Point them at [For members](#for-members) below.
 
 That's all. Nobody's PC has to stay on. The bot keeps the guild's details available and passes
 Discord messages to the members' Guild tabs.
 
-**To stop:** type `/chatstop` in the channel. Members' apps stop sharing, and the webhook is
-removed.
+**To stop:** type `/unbind` in the channel. Members' apps stop sharing.
+
+The bot's commands: `/bind` and `/unbind` (admins), `/guildcode` and `/chatlink` (everyone).
 
 ---
 
@@ -50,8 +46,7 @@ removed.
 ### 1. Join
 
 1. In your guild's Discord channel, type `/guildcode`. Only you see the answer.
-2. In CustomClassic Chat: *Settings → Guild ↔ Discord*. Paste the code (or the guild's name, if your guild
-   uses that) and press **Join**.
+2. In CustomClassic Chat: *Settings → Guild ↔ Discord*. Paste the code and press **Join**.
 3. Tick what you want:
    - **Share my chat**: your app helps send the guild's chat to Discord. Pick **Guild chat**, or,
      until the game has it, **Map chat** or **Whispers** to try it out.
@@ -86,8 +81,8 @@ PC.
 
 ## Own setup (advanced, without the shared bot)
 
-If your guild would rather not use the shared bot: *Settings → Guild setup → Set it up
-yourself…*
+If your guild would rather not use the shared bot: *Settings → Own guild setup* (under
+Advanced).
 
 1. **A webhook:** in the guild chat channel, *Edit Channel → Integrations → Webhooks → New Webhook
    → Copy Webhook URL*, and paste it.
@@ -95,7 +90,7 @@ yourself…*
    discord.com/developers → *New Application → Bot*. Copy its token and switch on **Message
    Content Intent**. The app shows the link that adds it to your server. The token stays on your
    PC.
-3. **The guild's name**, and whether members join with a code or the name. Press **Create**.
+3. **The guild's name.** Press **Create**: members join with the guild code it makes.
 
 How to join is posted in the channel. With your own bot, Discord messages reach the members only
 while your app is running. Logins (`/chatlink`) and typing come from the shared bot only.
@@ -106,7 +101,7 @@ while your app is running. Logins (`/chatlink`) and typing come from the shared 
 
 | What you see | What to do |
 | --- | --- |
-| `/chatsetup` doesn't show up | Make sure the bot is in the server's member list; if not, add it again with **Add to Server**. Commands can take a minute to appear after adding. |
+| `/bind` doesn't show up | Make sure the bot is in the server's member list; if not, add it again with **Add to Server**. Commands can take a minute to appear after adding. |
 | *"Waiting for the guild's details…"* | The code is right, but no details have come yet. Give it a minute; check the code with `/guildcode`. |
 | *"Not sharing"* | Tick **Share my chat**. |
 | Nothing from Discord in the Guild tab | The bot can't see the channel (common with private channels): *Edit Channel → Permissions*, add **CustomClassic Chat**, allow **View Channel**, **Send Messages** and **Read Message History**. In an own setup without a bot, Discord messages don't come through at all. |
@@ -122,6 +117,6 @@ while your app is running. Logins (`/chatlink`) and typing come from the shared 
 - **Encrypted from the code.** The members' apps meet through two free public message relays
   (MQTT). Messages are encrypted with a key made from the guild code, so the relays only pass
   sealed messages along.
-- **Who can read and post:** anyone with the code (or the name, for guilds that join by name) can
-  read the shared chat and post to the channel. Keep the code within the guild. If it leaks,
-  `/chatstop` and `/chatsetup` again make a new one.
+- **Who can read and post:** anyone with the code can read the shared chat and post to the
+  channel. Keep the code within the guild. If it leaks, `/unbind` and `/bind` again make a new
+  one.

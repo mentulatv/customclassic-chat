@@ -2,16 +2,16 @@
 peer-to-peer guild chat (which works without it).
 
 What it does, for each Discord server that invites it:
-  /chatsetup   (run by an admin in the guild's channel) creates the channel's webhook, makes the
-               guild code (or uses the guild's name), posts how to join, and leaves the guild's
-               details on the guild's encrypted channel for members' apps to pick up.
+  /bind        (server admins) binds the bot to the channel it's typed in: creates the channel's
+               webhook (members' apps post through it directly), makes the guild code, posts and
+               pins how to join, and leaves the guild's details on the guild's encrypted channel
+               for members' apps to pick up.
+  /unbind      (server admins) undoes it: members' apps stop sharing, the webhook is removed.
   /guildcode   tells whoever asks the guild code, privately.
-  /chatstop    (admin) closes the guild: members' apps stop sharing, the webhook is removed.
   /chatlink    gives whoever asks, privately, a link that logs their CustomClassic Chat in as their
                Discord name, signed by the bot, so they can type in the app's Guild tab and every
                member's app can check it's really them.
-  The Guild tab: people's messages in a set-up channel are passed, sealed, to the members' apps.
-  (!guildcode typed in the channel gets the same answer as /guildcode, in the channel.)
+  The Guild tab: people's messages in a bound channel are passed, sealed, to the members' apps.
 
 It never sees game chat in the clear: it only seals and publishes on the guild channels it set up.
 Run it with DISCORD_BOT_TOKEN set (a .env next to this file works); it keeps its few records in
@@ -168,15 +168,8 @@ class Channels:
         self.say(key, {"t": "discord", "author": author[:32], "text": gr.clean(text)})
 
 
-def guild_key_for(store: Store, name: str, by_name: bool) -> str:
-    """A new guild's key: a fresh random code, or the guild's own name (when it's free)."""
-    if by_name:
-        key = gr.guild_key(name)
-        if not key:
-            raise ValueError("Type the guild's name as it is in the game (letters and digits only).")
-        if store.key_taken(key):
-            raise ValueError("A guild with that name is set up already. Use a guild code instead.")
-        return key
+def guild_key_for(store: Store) -> str:
+    """A new guild's key: a fresh random code no other guild has."""
     while True:
         key = gr.new_code()
         if not store.key_taken(key):
@@ -223,17 +216,21 @@ def make_bot(store: Store, channels: Channels, key=None):
     async def on_guild_join(guild):
         await sync(guild)
 
-    @tree.command(name="chatsetup", description="Set up CustomClassic Chat for this channel: your guild's chat comes here.")
-    @app_commands.describe(guild_name="Your guild's name in the game",
-                           join_with="How members join: a guild code (safer) or the guild's name (easier)")
-    @app_commands.choices(join_with=[app_commands.Choice(name="a guild code (safer)", value="code"),
-                                     app_commands.Choice(name="the guild's name (easier, less private)", value="name")])
-    @app_commands.default_permissions(manage_webhooks=True)
+    def is_admin(interaction: discord.Interaction) -> bool:
+        return bool(getattr(interaction.user, "guild_permissions", None) and
+                    interaction.user.guild_permissions.administrator)
+
+    @tree.command(name="bind", description="Bind CustomClassic Chat to this channel: your guild's chat comes here.")
+    @app_commands.describe(guild_name="Your guild's name in the game")
+    @app_commands.default_permissions(administrator=True)
     @app_commands.guild_only()
-    async def chatsetup(interaction: discord.Interaction, guild_name: str, join_with: str = "code"):
+    async def bind(interaction: discord.Interaction, guild_name: str):
         channel = interaction.channel
+        if not is_admin(interaction):
+            await interaction.response.send_message("Only the server's admins can bind the bot.", ephemeral=True)
+            return
         if not isinstance(channel, discord.TextChannel):
-            await interaction.response.send_message("Run this in the text channel where guild chat should go.",
+            await interaction.response.send_message("Type /bind in the text channel where guild chat should go.",
                                                     ephemeral=True)
             return
         can = channel.permissions_for(channel.guild.me)
@@ -241,21 +238,17 @@ def make_bot(store: Store, channels: Channels, key=None):
             await interaction.response.send_message(
                 "I can't see this channel, so Discord messages here wouldn't reach the members' Guild tabs. "
                 "Edit Channel → Permissions → add CustomClassic Chat → allow View Channel, Send Messages and "
-                "Read Message History, then /chatsetup again.", ephemeral=True)
+                "Read Message History, then /bind again.", ephemeral=True)
             return
         old = store.by_channel(str(channel.id))
         if old:
             await interaction.response.send_message(
-                f"This channel is set up already, for **{old['name']}** ({gr.key_label(old['key'])}). "
-                "/chatstop first to start over.", ephemeral=True)
+                f"This channel is bound already, for **{old['name']}** ({old['key']}). /unbind first to start over.",
+                ephemeral=True)
             return
+        key = guild_key_for(store)
         try:
-            key = guild_key_for(store, guild_name.strip(), join_with == "name")
-        except ValueError as e:
-            await interaction.response.send_message(str(e), ephemeral=True)
-            return
-        try:
-            hook = await channel.create_webhook(name="CustomClassic Chat relay", reason="CustomClassic Chat /chatsetup")
+            hook = await channel.create_webhook(name="CustomClassic Chat relay", reason="CustomClassic Chat /bind")
         except discord.Forbidden:
             await interaction.response.send_message(
                 "I can't make a webhook here: give me the Manage Webhooks permission for this channel.", ephemeral=True)
@@ -263,16 +256,41 @@ def make_bot(store: Store, channels: Channels, key=None):
         store.add(str(interaction.guild_id), str(channel.id), key, guild_name.strip()[:40], hook.url, str(hook.id))
         channels.put_cfg(store.by_channel(str(channel.id)))
         await interaction.response.send_message(
-            f"Set up for **{gr.clean(guild_name)[:40]}**. " + gr.join_text(key) +
-            " Anyone can type /guildcode to get it again.")
+            f"**{gr.clean(guild_name)[:40]}**'s guild chat now comes to this channel. " + gr.join_text(key) +
+            " Lost it? Type /guildcode. To type here from the game's overlay: /chatlink.")
+        try:  # the code stays at the top of the channel for everyone
+            await (await interaction.original_response()).pin(reason="CustomClassic Chat: how to join")
+        except discord.HTTPException:
+            await interaction.followup.send("Tip: give me Manage Messages in this channel and I'll pin the code "
+                                            "next time; members can always get it with /guildcode.", ephemeral=True)
+
+    @tree.command(name="unbind", description="Unbind CustomClassic Chat from this channel: members' apps stop sharing.")
+    @app_commands.default_permissions(administrator=True)
+    @app_commands.guild_only()
+    async def unbind(interaction: discord.Interaction):
+        if not is_admin(interaction):
+            await interaction.response.send_message("Only the server's admins can unbind the bot.", ephemeral=True)
+            return
+        row = store.by_channel(str(interaction.channel_id))
+        if not row:
+            await interaction.response.send_message("This channel isn't bound.", ephemeral=True)
+            return
+        channels.close(row["key"])
+        store.remove(row["channel_id"])
+        try:
+            hook = await client.fetch_webhook(int(row["webhook_id"]))
+            await hook.delete(reason="CustomClassic Chat /unbind")
+        except Exception:
+            pass
+        await interaction.response.send_message(f"Unbound: **{row['name']}**'s chat no longer comes here.")
 
     @tree.command(name="guildcode", description="How to join this server's guild chat in CustomClassic Chat.")
     @app_commands.guild_only()
     async def guildcode(interaction: discord.Interaction):
         rows = store.by_server(str(interaction.guild_id))
         if not rows:
-            await interaction.response.send_message("Guild chat isn't set up here yet: an admin can /chatsetup.",
-                                                    ephemeral=True)
+            await interaction.response.send_message("Guild chat isn't bound to a channel here yet: an admin can "
+                                                    "/bind it.", ephemeral=True)
             return
         here = next((r for r in rows if r["channel_id"] == str(interaction.channel_id)), rows[0])
         await interaction.response.send_message(f"**{here['name']}** (<#{here['channel_id']}>): " + gr.join_text(here["key"]),
@@ -289,36 +307,13 @@ def make_bot(store: Store, channels: Channels, key=None):
             f"With CustomClassic Chat running on this PC, open this link to log it in as **{interaction.user.display_name}** "
             f"(for {LOGIN_DAYS} days): {link}\nIt's yours alone: don't share it.", ephemeral=True)
 
-    @tree.command(name="chatstop", description="Stop CustomClassic Chat in this channel: members' apps stop sharing.")
-    @app_commands.default_permissions(manage_webhooks=True)
-    @app_commands.guild_only()
-    async def chatstop(interaction: discord.Interaction):
-        row = store.by_channel(str(interaction.channel_id))
-        if not row:
-            await interaction.response.send_message("This channel isn't set up.", ephemeral=True)
-            return
-        channels.close(row["key"])
-        store.remove(row["channel_id"])
-        try:
-            hook = await client.fetch_webhook(int(row["webhook_id"]))
-            await hook.delete(reason="CustomClassic Chat /chatstop")
-        except Exception:
-            pass
-        await interaction.response.send_message(f"Stopped: **{row['name']}**'s chat no longer comes here.")
-
     @client.event
     async def on_message(message):
         row = store.by_channel(str(message.channel.id))
         if not row or message.author == client.user:
-            if not message.author.bot:
-                log.info("message in a channel that isn't set up (%s)", message.channel.id)
-            return
-        if message.content.strip().lower() in ("!guildcode", "!guild code", "!ccchat"):
-            await message.channel.send(gr.join_text(row["key"]))
             return
         if should_pass_on(message, row):
             channels.discord_message(row["key"], message.author.display_name, message.content)
-            log.info("passed on a message in %s", row["name"])
         else:  # why a message in a set-up channel didn't go to the Guild tabs (never what it says)
             log.info("not passed on in %s: words=%s bot=%s webhook=%s", row["name"], bool(message.content),
                      message.author.bot, message.webhook_id)

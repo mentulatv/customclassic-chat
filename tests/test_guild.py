@@ -2,10 +2,10 @@
 import guild_relay as g
 
 
-def test_codes_and_names():
+def test_guild_codes():
     assert g.guild_key(" abcd efgh jklm ") == "ABCD-EFGH-JKLM" == g.guild_key("ABCD-EFGH-JKLM")
-    assert g.guild_key("ABCD-EFGH-1234") == ""  # 1 isn't in codes, and hyphens aren't in guild names
-    assert g.guild_key("MapleGuild") == "name:mapleguild" and g.key_label("name:mapleguild") == "mapleguild"
+    assert g.guild_key("ABCD-EFGH-1234") == ""  # 1 isn't in codes
+    assert g.guild_key("MapleGuild") == ""  # a guild's name doesn't join: only its code
     assert g.guild_key("two words") == "" and g.guild_key("") == ""
     assert len(g.new_code()) == 14 and g.guild_key(g.new_code())
     assert g.bot_invite("MTIzNDU2Nzg5MDEyMzQ1Njc4.x.y").endswith("client_id=123456789012345678&scope=bot&permissions=66560")

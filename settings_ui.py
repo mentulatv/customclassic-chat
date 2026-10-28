@@ -377,7 +377,7 @@ class SettingsWindow:
                                              "tab here. Get the code with /guildcode in your guild's Discord.")
         row = tk.Frame(c, bg=CARD)
         row.pack(fill="x")
-        label(row, "Guild code or name").pack(side="left")
+        label(row, "Guild code").pack(side="left")
         field = entry(row, code, 18)
         field.pack(side="left", padx=8, ipady=2)
         note = label(c, "", soft=True, size=9, wrap=470)
@@ -399,7 +399,7 @@ class SettingsWindow:
             key = guild_relay.guild_key(code.get())
             if not key:
                 note.configure(text="Not in a guild's chat." if not code.get().strip() else
-                               "That's neither a guild code (ABCD-EFGH-JKLM) nor a guild name.", fg=SOFT)
+                               "That isn't a guild code (it looks like ABCD-EFGH-JKLM).", fg=SOFT)
                 return
             cfg = opts["relay_cfg"].get(key) or opts["relay_admin"].get(key) or {}
             peer = app.relay
@@ -497,14 +497,14 @@ class SettingsWindow:
         """For whoever runs the guild's Discord: the shared bot, the easy way (or the steps yourself)."""
         invite = guild_relay.shared_bot_invite()
         c = card(page, "The easy way: the CustomClassic Chat bot",
-                 "For whoever runs the guild's Discord, once: 1. add the bot to your server, 2. type /chatsetup in "
-                 "the channel for guild chat, 3. tell members to type /guildcode there and put the code in "
-                 "Settings → Guild ↔ Discord. Nothing else to set up, and no PC has to stay on." if invite else
+                 "For the server's admins, once: 1. add the bot to your server, 2. type /bind in the channel for "
+                 "guild chat: the bot posts and pins the guild code there, 3. members put the code in Settings → "
+                 "Guild ↔ Discord (/guildcode brings it back). No PC has to stay on." if invite else
                  "Coming soon: one bot that does all of this for you. Until then, set it up yourself.")
         if invite:
             button(c, "Add the CustomClassic Chat bot to your server",
                    lambda: __import__("webbrowser").open(invite), primary=True).pack(anchor="w")
-        c = card(page, "Or set it up yourself", "With a webhook you make in the channel, and your own bot if you want "
+        c = card(page, "Or set it up yourself (advanced)", "With a webhook you make in the channel, and your own bot if you want "
                                                 "the Guild tab without the shared one. Your PC then keeps the guild "
                                                 "going for its members.")
         button(c, "Set it up yourself…", lambda: self.show("Own guild setup")).pack(anchor="w")
@@ -517,7 +517,6 @@ class SettingsWindow:
         """A guild run from this PC: a webhook, optionally its own bot, and how members join."""
         app, opts, top = self.app, self.opts, self.top
         hook, bot, gname = tk.StringVar(), tk.StringVar(), tk.StringVar()
-        by_name = tk.BooleanVar(value=False)
         c = card(page, "1. A webhook for the channel", "In the Discord channel for guild chat: Edit Channel → "
                                                        "Integrations → Webhooks → New Webhook → Copy Webhook URL.")
         f = entry(c, hook, 52)
@@ -579,13 +578,8 @@ class SettingsWindow:
         row.pack(fill="x")
         label(row, "Guild name").pack(side="left")
         entry(row, gname, 18).pack(side="left", padx=8, ipady=2)
-        row = tk.Frame(c, bg=CARD)
-        row.pack(fill="x", pady=(6, 0))
-        label(row, "Members join with").pack(side="left")
-        radio(row, "a guild code (safer)", by_name, False, lambda: None).pack(side="left", padx=(8, 0))
-        radio(row, "the guild's name (easier)", by_name, True, lambda: None).pack(side="left", padx=(8, 0))
-        label(c, "With the name, anyone who knows it can read the shared chat and post to the channel.", soft=True,
-              size=9, wrap=470).pack(fill="x", pady=(2, 0))
+        label(c, "Members join with a guild code made for it.", soft=True, size=9, wrap=470).pack(fill="x",
+                                                                                                pady=(4, 0))
         row = tk.Frame(page, bg=BG)
         row.pack(fill="x")
         made = label(page, "", soft=True, size=9, wrap=520, bg=BG)
@@ -621,7 +615,7 @@ class SettingsWindow:
 
             def work():
                 try:
-                    out = guild_relay.create_guild(gname.get(), hook.get(), bot.get(), by_name.get())
+                    out = guild_relay.create_guild(gname.get(), hook.get(), bot.get())
                 except Exception as e:  # shown as it is
                     out = e
                 top.after(0, lambda: top.winfo_exists() and created(out))
