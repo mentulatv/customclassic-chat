@@ -1558,13 +1558,13 @@ class ChatView:
                               font=self.font, width=w - 2 * pad - b)
             th = c.bbox(t)[3]
             c.move(t, 0, y - th)
-            if solid:  # a shadow, so solid text reads over whatever shows through behind it
+            if m.get("bg"):  # a megaphone's band, as the game draws it: solid with its text, which is dark
+                band = c.create_rectangle(0, y - th, w - b - 1, y, fill=m["bg"], outline="")
+                c.tag_lower(band)
+            elif solid:  # a shadow, so solid text reads over whatever shows through behind it
                 shade = c.create_text(pad + 1, y - th + 1, anchor="nw", text=c.itemcget(t, "text"), fill=SHADOW,
                                       font=self.font, width=w - 2 * pad - b)
                 c.tag_lower(shade, t)
-            if m.get("bg"):  # a megaphone's band, as the game draws it
-                band = bgc.create_rectangle(0, y - th, w - b - 1, y, fill=m["bg"], outline="")
-                bgc.tag_lower(band)
             if m.get("watch"):  # caught by the watch list: a gold edge
                 c.create_rectangle(0, y - th, 2, y - 1, fill=GOLD, outline="")
             y -= th
