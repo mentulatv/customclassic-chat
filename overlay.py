@@ -38,6 +38,7 @@ if user32:
 GWLP_HWNDPARENT = -8  # a top-level window's owner
 CEILING = None  # a window (the settings) every Overlay stays under while it's open, rather than on top of it
 HOLD = False  # a menu is open: no Overlay re-raises itself over it until it closes
+FRONT: set = set()  # Overlays kept in front of the others (adjust mode's banner)
 
 
 def set_ceiling(window) -> None:
@@ -160,6 +161,10 @@ class Overlay:
         for o in self.behind:
             if not o.hidden and o.root.winfo_exists():
                 o.keep_on_top(again=False)
+        for o in list(FRONT):  # (an adjust banner) back in front of whatever was just raised
+            if o is not self and not o.hidden and o.root.winfo_exists():
+                user32.SetWindowPos(o.hwnd, ceiling or HWND_TOPMOST, 0, 0, 0, 0,
+                                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE)
         if again:
             self.root.after(2000, self.keep_on_top)
 
