@@ -97,16 +97,16 @@ See-through, Settings…, Quit.
 
 **Right-click any chat window** for Split the chat, New chat window, Close this window,
 See-through, Adjust position and Settings…. The menu closes when you click elsewhere, move the
-pointer well away from it, or after 10 seconds (Settings → Chat; 0 keeps it open).
+pointer well away from it, or after 10 seconds (Settings → Chat details; 0 keeps it open).
 
 **Split the chat:** click **+** at the right end of the tab row (or right-click, the tray menu,
-or Settings → Tabs). A second pane appears on
+or Settings → Tabs & windows). A second pane appears on
 top of the chat, as wide as it and moving with it, with its own row of tabs: Mega to start with,
 so megaphones sit above and your chat below. Drag the **divider bar** between the two to give one
 more room and the other less; drag the split's ≡ to make the whole thing taller. Click its ✕ to
 close it. A tab open in one pane gets no unread dot in the other.
 
-**More chat windows:** tray menu or Settings → Position → **Add a chat window**. Each window
+**More chat windows:** tray menu or Settings → Tabs & windows → **Add a chat window**. Each window
 has its own tab and ◐, and goes anywhere you drag it: next to the game, on another screen. It
 starts in adjust mode; press Ctrl+Alt+F5 to keep it where it is (Ctrl+Alt+F5 later moves all
 windows again). Click its ✕ to close it. Windows and splits are remembered between restarts.
@@ -130,36 +130,45 @@ game's chat box, and a panel left on a monitor that's gone comes back to the mid
 
 Right-click the tray icon → **Settings…**. Changes apply right away and are remembered.
 
-<img src="docs/settings-appearance.png" alt="Settings, Appearance: text size, transparency and colour swatches" width="49%"> <img src="docs/settings-chat.png" alt="Settings, Chat: time stamps, history, what to leave out, sounds" width="49%">
+<img src="docs/settings-appearance.png" alt="Settings, Appearance: text size, panel opacity, solid text" width="49%"> <img src="docs/settings-chat.png" alt="Settings, Chat: time stamps, what to leave out, character names, whisper chime" width="49%">
 
 <img src="docs/settings-watch-list.png" alt="Settings, Watch list: words and items to look out for, and how to be told" width="49%">
 
-- Text size (or match the game's), how see-through ◐ makes it, the panel's opacity
-- Position: on the game's chat, or **unlocked** to go anywhere, and **Reset position**
-- Time stamps: with seconds, without, or off. They come from CustomClassic Chat's own clock.
-- How many hours of history to keep, or forever
-- Colours of the background and of each chat type, and **Reset to default colours**
-- Your character names, so their name tags behind the chat are left out
-- Whether the game's system messages show (out of MP, shop closed, play time…)
-- **Lines padded with spacers** (`S> claw 60 @@@@@@@@@@@@`), which crowded maps fill the chat
-  with: leave them out by what they're about, with a box each for **buying and selling**,
-  **party quests and parties** (LF KPQ, need 2 more) and everything else. All three are left
-  out to start with. Left-out lines are kept, so unticking a box brings them back.
-- **A tab of your own:** its name, and which of map chat, whispers, party, buddy/guild,
-  megaphones, system messages and watch-list catches it shows (whispers, party and buddy
-  to start with). Untick it to hide the tab.
-- The whisper chime
-- The watch list
+The sidebar comes in three layers, most vital first:
+
+**Basics**, what everyone sets:
+- **Appearance:** text size (or match the game's), the panel's opacity, and **Keep the text
+  solid** (only the background fades; the text gets a shadow)
+- **Position:** on the game's chat, or **unlocked** to go anywhere, and **Reset position**
+- **Chat:** time stamps (with seconds, without, or off; from CustomClassic Chat's own clock),
+  leaving out the game's system messages and **lines padded with spacers**
+  (`S> claw 60 @@@@@@@@@@@@`), your character names (so their name tags behind the chat are left
+  out), and the whisper chime
+- **Watch list**
+
+**Extras**, features to turn on:
+- **Tabs & windows:** a tab of your own (its name, and which of map chat, whispers, party,
+  buddy/guild, megaphones, system messages and watch-list catches it shows), splitting the
+  chat, and extra chat windows
+- **Twitch**, **Guild ↔ Discord** and **Guild setup** (below)
+
+**Advanced**, finer choices with good defaults:
+- **Look:** the font (seven hand-picked: sans serif, serif and monospace) and **bold**, the
+  colours of the background and of each chat type, and how see-through ◐ makes the messages
+- **Chat details:** how many hours of history to keep (or forever), which kinds of spacer lines
+  to leave out (buying and selling, party quests and parties, everything else; left-out lines
+  are kept, so unticking brings them back), and when the right-click menu closes
+- **Own guild setup** (below)
 
 ## Twitch chat (opt-in)
 
-Settings → tick **Twitch chat from the channel**, type the channel's name (or paste its
+Settings → Twitch → tick **Show Twitch chat**, type the channel's name (or paste its
 twitch.tv link) and press **Use**. Its chat shows in a **Twitch** tab, each chatter in their
 own name colour, and in All too if you tick **Show it in All too**. The custom tab can show it
 as well. CustomClassic Chat reads the chat as a guest, the way anyone can watch a channel's chat
 without logging in: no account, key or password, and it never writes in the chat.
 
-## Guild chat to Discord (opt-in, peer to peer)
+## Guild ↔ Discord (opt-in, peer to peer)
 
 Your guild's chat in your guild's Discord channel, and that channel back in a **Guild** tab where
 members can type to it, with **no server of anyone's in between** for the chat: the members' own
@@ -173,7 +182,7 @@ channel for guild chat. Members join with a **guild code** (`ABCD-EFGH-JKLM`, sa
 guild's name** (easier, less private). Guilds that would rather not use the shared bot can *Set it
 up yourself* with a webhook and, optionally, their own bot.
 
-**Joining:** `/guildcode` in the guild's Discord, then *Settings → Guild*: enter the code (or
+**Joining:** `/guildcode` in the guild's Discord, then *Settings → Guild ↔ Discord*: enter the code (or
 name), **Join**, and tick **Share my chat** and/or **Show a Guild tab**.
 
 **Typing in the Guild tab:** `/chatlink` in the guild's Discord gives a link that logs your app in

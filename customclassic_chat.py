@@ -48,7 +48,7 @@ CACHE_DIR = HERE / "cache"
 DEFAULTS = {
     "interval_s": 0.7,        # seconds between reads of the chat
     "font_px": None,          # message text size in pixels; None: sized from the game's chat lines
-    "font_family": "Verdana", # the messages' font, one of FONTS (Settings → Advanced)
+    "font_family": "Verdana", # the messages' font, one of FONTS (Settings → Look)
     "font_bold": False,       # the messages in bold
     "min_lines": 3,           # fewer lines in the game's chat (minimised, one or two): megaphones arriving together
                               # may scroll away unread, and a quiet ⚠ shows until clicked
@@ -131,7 +131,7 @@ GOLD = "#ffd24a"  # the watch list's star and dot
 ADJUST, ADJUST_EDGE = "#2f6fe0", "#9fc2ff"  # adjust mode: the banner, the outline and corner handles
 SB_TRACK, SB_BUTTON, SB_ARROW, SB_THUMB, SB_EDGE = "#e3e8ef", "#a9c8ee", "#1f4f8f", "#8ea3c2", "#5b7fb4"  # as the game's
 FONT = "Verdana"
-# the fonts on offer for the messages (Settings → Advanced): hand-picked, all in every Windows, as
+# the fonts on offer for the messages (Settings → Look): hand-picked, all in every Windows, as
 # (family, kind)
 FONTS = [("Verdana", "sans serif"), ("Segoe UI", "sans serif"), ("Tahoma", "sans serif"),
          ("Georgia", "serif"), ("Times New Roman", "serif"), ("Consolas", "monospace"), ("Courier New", "monospace")]
@@ -2253,7 +2253,7 @@ class ChatPanel(ChatView):
         save_settings(self.opts)
 
     def set_font(self, family: str, bold: bool) -> None:
-        """The messages' font and weight (Settings → Advanced)."""
+        """The messages' font and weight (Settings → Look)."""
         self.opts["font_family"], self.opts["font_bold"] = family, bold
         self.set_fonts()
         self.render()

@@ -514,7 +514,7 @@ def join_text(key: str) -> str:
     how = (f"the guild code **{key}**" if not key.startswith("name:") else
            f"the guild's name, **{key_label(key)}**")
     return (f"To bring your guild chat here and this channel into your game overlay: in CustomClassic Chat, "
-            f"Settings → Discord, enter {how}, then tick what you want to share or see.")
+            f"Settings → Guild ↔ Discord, enter {how}, then tick what you want to share or see.")
 
 
 def check_bot(token: str, channel_id: str) -> str:
