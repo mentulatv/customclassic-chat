@@ -34,6 +34,7 @@ import re
 import sys
 import threading
 import time
+import uuid
 from collections import deque
 
 import guild_relay
@@ -1341,7 +1342,8 @@ class ChatView:
             return
         for name, x0, x1 in self.buttons():
             if x0 - 2 <= e.x < x1 + 2:
-                {"see": self.toggle_see_through, "split": self.app.add_split, "warn": self.dismiss_warning}[name]()
+                {"see": self.toggle_see_through, "split": lambda: self.app.add_split(self),
+                 "warn": self.dismiss_warning}[name]()
                 self.render()
                 return
         for name, x0, x1 in self.tab_spans():
@@ -1352,7 +1354,11 @@ class ChatView:
         self.render()
 
     def can_resize(self) -> bool:
-        """Whether the corner grip shows: everywhere but on a split (its divider sizes it)."""
+        """Whether the corner grip shows: on what can move (a split's divider sizes it)."""
+        return self.movable()
+
+    def movable(self) -> bool:
+        """Whether it can be moved and resized: not the panel fixed on the game's chat, not a split."""
         return True
 
     def corner_px(self) -> int:
@@ -1363,8 +1369,18 @@ class ChatView:
 
     BUTTON_TEXT = {"see": "◐", "split": "+"}
 
+    def split_of(self):
+        """The split on top of this window, if it has one."""
+        return next((w for w in self.app.windows if w.docked and w.host is self), None)
+
     def can_split(self) -> bool:
-        return False
+        """One split per window, on top of it; a split doesn't split again."""
+        return not getattr(self, "docked", False) and self.split_of() is None
+
+    def place_splits(self) -> None:
+        split = self.split_of()
+        if split is not None:
+            split.follow()
 
     def buttons(self) -> list[tuple[str, int, int]]:
         """The buttons at the right end of the tab strip (left of the corner grip), right to left, as
@@ -1386,28 +1402,25 @@ class ChatView:
         if app.adjusting():  # moving and resizing: first, the way to finish
             m.add_command(label="✓ Done: keep it here", command=lambda: app.on_hotkey(HK_EDIT))
             m.add_separator()
-        split = next((w for w in app.windows if w.docked), None)
+        split = self if self.docked else self.split_of()
         if split is None:
-            m.add_command(label="Split the chat (a pane on top)", command=app.add_split)
+            m.add_command(label="Split this window (a pane on top)", command=lambda: app.add_split(self))
         else:
             m.add_command(label="Remove the split", command=split.close)
         m.add_command(label="New chat window", command=app.add_window)
         m.add_separator()
         m.add_command(label=("✓ " if self.see_through else "") + "See-through", command=lambda: (
             self.toggle_see_through(), self.render()))
-        if not app.adjusting():
+        if not app.adjusting() and self.movable():
             m.add_command(label="Move or resize…" + (" (Ctrl+Alt+F5)" if self.opts["adjust_hotkey"] else ""),
                           command=lambda: app.on_hotkey(HK_EDIT))
         m.add_command(label="Settings…", command=app.open_settings)
-        m.add_separator()
-        if not self.closable:  # the chat on the game's chat box: hidden, and Show in the tray brings it back
-            m.add_command(label="Hide the chat (tray icon → Show brings it back)",
-                          command=lambda: app.on_hotkey(HK_HIDE))
         open_ = threading.Event()
         open_.set()
         threading.Thread(target=close_menu_when_left, args=(open_, float(self.opts["menu_close_s"] or 0)),
                          daemon=True).start()
-        if self.closable and not self.docked:  # (a split: Remove the split, above)
+        if self.closable and not self.docked:  # (a split: Remove the split, above; the panel on the game's
+            m.add_separator()                  # chat stays, anchored: ◐ makes it see-through)
             m.add_command(label="Close this window", command=self.close)
         import overlay
         overlay.HOLD = True  # the chat windows' re-raising waits: the menu stays on top
@@ -1686,6 +1699,7 @@ class ExtraChat(ChatView):
 
     def __init__(self, app, conf: dict):
         self.app, self.conf = app, conf  # conf: its entry in opts["windows"], saved as it changes
+        conf.setdefault("id", uuid.uuid4().hex[:12])  # how a split names the window it's on
         self.log = app.log.view_of(conf.get("tab") or "All")
         self.build("CustomClassic Chat window", master=app.root)
         self.div = self.div_drag = None
@@ -1713,7 +1727,7 @@ class ExtraChat(ChatView):
             c.create_line(x - 3, h // 2, x + 3, h // 2, fill=INK if hot else SOFT, width=2)
 
     def on_div_press(self, e) -> None:
-        self.div_drag = (e.y_root, int(self.conf.get("height") or 120), self.app.placed(), self.app.opts["extra"])
+        self.div_drag = (e.y_root, int(self.conf.get("height") or 120), self.host.placed(), self.app.opts["extra"])
 
     def on_div_drag(self, e) -> None:
         """Move the line between the split and the chat: one gets taller as the other gets shorter,
@@ -1722,20 +1736,20 @@ class ExtraChat(ChatView):
         if not self.div_drag:
             return
         y0, h0, m0, extra0 = self.div_drag
-        app, line, sh = self.app, self.line, strip_height(self.line)
+        app, host, line, sh = self.app, self.host, self.line, strip_height(self.line)
         d = max(sh + 2 * round(line) + self.DIV - h0, e.y_root - y0)
-        on_chat = not app.is_free and app.read_rect and app.game
+        on_chat = host is app and not app.is_free and app.read_rect and app.game
         d = min(d, extra0 if on_chat else m0["height"] - sh - 2 * round(line))
         self.conf["height"] = h0 + d
         if on_chat:
             app.opts["extra"] = extra0 - d
-        app.place({**m0, "top": m0["top"] + d, "height": m0["height"] - d})
+        host.place({**m0, "top": m0["top"] + d, "height": m0["height"] - d})
 
     def on_div_release(self, e) -> None:
         if self.div_drag:
             self.div_drag = None
-            if self.app.is_free:
-                self.app.keep(self.app.placed())
+            if self.host.is_free:
+                self.host.keep(self.host.placed())
             save_settings(self.opts)
 
     # what the main panel knows, shared
@@ -1765,11 +1779,17 @@ class ExtraChat(ChatView):
 
     @property
     def docked(self) -> bool:
-        """A split: docked on top of the main panel, as wide as it and moving with it."""
+        """A split: docked on top of the window it splits, as wide as it and moving with it."""
         return self.conf.get("dock") == "above"
 
-    def can_resize(self) -> bool:
-        return not self.docked
+    @property
+    def host(self):
+        """The window a split is on: the main panel, or the extra window it was made from."""
+        host = self.conf.get("host")
+        return next((w for w in self.app.windows if host and w.conf.get("id") == host), self.app)
+
+    def movable(self) -> bool:
+        return not self.docked  # a split goes where its window goes
 
     def keep(self, rect: dict) -> None:
         if self.docked:  # only its height is its own
@@ -1782,7 +1802,9 @@ class ExtraChat(ChatView):
 
     def place(self, r: dict) -> None:
         if not self.div:
-            return ChatView.place(self, r)
+            ChatView.place(self, r)
+            self.place_splits()
+            return
         d = self.DIV
         ChatView.place(self, {**r, "height": r["height"] - d})
         self.div.place(r["left"], r["top"] + r["height"] - d, r["width"], d)
@@ -1810,7 +1832,7 @@ class ExtraChat(ChatView):
     def follow(self) -> None:
         if self.docked:
             if not self.grip:
-                p = self.app.placed()
+                p = self.host.placed()
                 h = int(self.conf.get("height") or 120)
                 self.place({"left": p["left"], "top": p["top"] - h, "width": p["width"], "height": h})
             return
@@ -2059,6 +2081,9 @@ class ChatPanel(ChatView):
     def see_through(self) -> bool:
         return bool(self.opts["see_through"])
 
+    def movable(self) -> bool:
+        return self.is_free  # on the game's chat box it stays put: split or hide it, or unlock it
+
     @property
     def is_free(self) -> bool:
         return bool(self.opts["unlocked"])
@@ -2129,13 +2154,26 @@ class ChatPanel(ChatView):
                                    "Done. Right-click → Close this window closes it."))
         self.settings_changed()
 
-    def add_split(self) -> None:
-        """Split the chat: a pane with its own tab row on top of the panel, as wide as it and moving
-        with it (Mega to start with, so megaphones sit above the chat). Its ≡ grip sets its height."""
-        if not self.can_split():
-            self.events.put(("status", "The chat is split already: its pane's ✕ removes the split."))
+    def add_split(self, host=None) -> None:
+        """Split a window (the panel, or an extra window): a pane with its own tab row takes the top
+        of it, as wide as it and moving with it (Mega to start with, so megaphones sit above the
+        chat), and the window keeps the rest. The panel on the game's chat never gets shorter than
+        that chat: its split takes the room above the chat first, and then reaches higher."""
+        host = host or self
+        if not host.can_split():
+            self.events.put(("status", "That window is split already: right-click → Remove the split."))
             return
-        conf = {"dock": "above", "tab": "Mega", "see_through": False, "height": round(self.line * 5) + 20}
+        h, p = round(self.line * 5) + 20, host.placed()
+        if host is self and not self.is_free:
+            take = min(h, int(self.opts["extra"]))
+            self.opts["extra"] -= take
+        else:
+            take = h = min(h, p["height"] // 2)
+            host.keep({**p, "top": p["top"] + take, "height": p["height"] - take})
+        host.place({**p, "top": p["top"] + take, "height": p["height"] - take})
+        conf = {"dock": "above", "tab": "Mega", "see_through": False, "height": h}
+        if host is not self:
+            conf["host"] = host.conf["id"]
         self.opts["windows"].append(conf)
         w = ExtraChat(self, conf)
         self.windows.append(w)
@@ -2145,21 +2183,28 @@ class ChatPanel(ChatView):
 
     def place(self, r: dict) -> None:
         ChatView.place(self, r)
-        for w in self.windows:  # splits move with it
-            if w.docked:
-                w.follow()
-
-    def can_split(self) -> bool:
-        """One split at a time: a pane on top of the chat."""
-        return not any(w.docked for w in self.windows)
+        self.place_splits()  # its split moves with it
 
     def stack_now(self) -> dict:
         """The panel with its splits on top: where it all sits on screen."""
         p = self.panel_now()
-        top = min([p["top"]] + [w.panel_now()["top"] for w in self.windows if w.docked])
+        split = self.split_of()
+        top = min(p["top"], split.panel_now()["top"]) if split else p["top"]
         return {**p, "top": top, "height": p["top"] + p["height"] - top}
 
     def close_window(self, w: "ExtraChat") -> None:
+        """Close a window (and its split), or remove a split: its room goes back to the window it was on."""
+        split = None if w.docked else w.split_of()
+        if split is not None:
+            self.close_window(split)
+        if w.docked:
+            host, h = w.host, int(w.conf.get("height") or 0)
+            p = host.placed()
+            if host is self and not self.is_free:
+                self.opts["extra"] += h
+            elif host.is_free:
+                host.keep({**p, "top": p["top"] - h, "height": p["height"] + h})
+            host.place({**p, "top": p["top"] - h, "height": p["height"] + h})
         self.windows.remove(w)
         self.opts["windows"] = [c for c in self.opts["windows"] if c is not w.conf]
         w.destroy()
@@ -2205,7 +2250,7 @@ class ChatPanel(ChatView):
             visible = bool(up and (rect or unlocked)) and not self.user_hidden and not (self.covered and not stays)
             self.show(visible)
             for w in self.windows:  # a split goes with the panel; a window is never over the game's chat
-                w.show(visible if w.docked else up and not self.user_hidden)
+                w.show(visible if w.docked and w.host is self else up and not self.user_hidden)
         self.root.after(300, self.follow)
 
     def toggle_see_through(self) -> None:
@@ -2318,8 +2363,8 @@ class ChatPanel(ChatView):
             if not self.opts["adjust_hotkey"]:
                 return
             hk = HK_EDIT
-        if hk == HK_EDIT:  # adjust every window; again (or Done), each keeps where it was put
-            views = [self, *self.windows]
+        if hk == HK_EDIT:  # adjust every window that can move; again (or Done), each keeps where it was put
+            views = [v for v in [self, *self.windows] if v.movable()]
             if any(v.msgs.edit for v in views):
                 for v in views:
                     if v.set_edit(False):

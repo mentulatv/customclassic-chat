@@ -91,8 +91,8 @@ python.exe to PATH"), download this repository, double-click **`setup.bat`** onc
 | **≡** (left end) | Opens the menu (the same as right-clicking the chat). |
 | Tabs | Click to switch. A red dot means unread messages; a gold dot on Watch means your watch list caught something. |
 | **◐** (right end) | See-through: messages 90% see-through and click-through until clicked again. |
-| **+** (next to ◐) | Split the chat: a second pane on top with its own tabs (shown while it isn't split). |
-| **Corner grip** (right end) | Drag to resize: wider to the right, taller upward; the bottom-left corner stays. On the game's chat box the width follows the game's chat, so it only gets taller. |
+| **+** (next to ◐) | Split this window: a pane on top of it with its own tabs (shown while it isn't split). |
+| **Corner grip** (right end) | Drag to resize: wider to the right, taller upward; the bottom-left corner stays. On extra windows and an unlocked panel: the chat on the game's chat box stays put. |
 | **⚠** (amber) | Only when the game's chat is minimised or shows one or two lines: megaphones arriving together may scroll away unread. Make the game's chat taller, or click ⚠ to hide it. |
 
 **Scrolling:** the arrows (hold to keep going), the track, dragging the thumb, or the mouse
@@ -102,17 +102,18 @@ wheel. New messages don't pull you down while you're reading back.
 resize…, Check for updates, Unlocked (place it anywhere), Reset position, Split the chat, New chat window,
 See-through, Settings…, Quit.
 
-**Right-click any chat window** (or click its **≡**) for Split the chat or Remove the split, New
-chat window, See-through, **Move or resize…**, Settings…, and closing: **Close this
-window** on an extra window, **Hide the chat** on the main one (the tray icon's **Show** brings it
-back). While moving or resizing, the menu's first entry is **Done: keep it here**. The menu closes when you click elsewhere, move the
+**Right-click any chat window** (or click its **≡**) for Split this window or Remove the split, New
+chat window, See-through, **Move or resize…** (not on the chat anchored on the game's chat box: it
+stays there, so you always know CustomClassic Chat is running; ◐ makes it see-through), Settings…,
+and **Close this window** on an extra window. While moving or resizing, the menu's first entry is **Done: keep it here**. The menu closes when you click elsewhere, move the
 pointer well away from it, or after 10 seconds (Settings → Chat details; 0 keeps it open).
 
-**Split the chat:** click **+** at the right end of the tab row (or right-click, the tray menu,
-or Settings → Tabs & windows). A second pane appears on
-top of the chat, as wide as it and moving with it, with its own row of tabs: Mega to start with,
-so megaphones sit above and your chat below. Drag the **divider bar** between the two to give one
-more room and the other less. Right-click it → **Remove the split** to close it. A tab open in one pane gets no unread dot in the other.
+**Split a window:** click **+** at the right end of its tab row, or right-click it → **Split this
+window** (the tray menu and Settings → Tabs & windows split the main chat). A second pane takes the
+top of that window, as wide as it and moving with it, with its own row of tabs: Mega to start
+with, so megaphones sit above and your chat below. (The main chat keeps covering the game's chat,
+so its split goes above it.) Drag the **divider bar** between the two to give one more room and the
+other less. Right-click it → **Remove the split** gives the room back. A tab open in one pane gets no unread dot in the other.
 
 **More chat windows:** tray menu or Settings → Tabs & windows → **Add a chat window**. Each window
 has its own tab and ◐, and goes anywhere you drag it: next to the game, on another screen. It
