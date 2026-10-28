@@ -1139,8 +1139,9 @@ def read_loop(app) -> None:
                             # one odd read (a band, a wrap) mustn't shrink the panel
                             shorts.append(n if 0 < n < 3 else 0)
                             if n and shorts.count(n) == 2:  # that many lines, up from its bottom
-                                found = ({"left": r["left"] - x0, "top": r["top"] + r["height"] - y0 - n * line,
-                                          "width": r["width"], "height": n * line}, app.line)
+                                h = round(n * line)
+                                found = ({"left": r["left"] - x0, "top": round(r["top"] + r["height"] - y0) - h,
+                                          "width": r["width"], "height": h}, app.line)
                         elif found:
                             shorts.clear()
                         lost = 0 if found or closed else lost + 1
@@ -2341,7 +2342,17 @@ class ChatPanel(ChatView):
 
     def follow(self) -> None:
         """Keep the panel on the game's chat box (or where it was put, when unlocked), the extra
-        windows where they were put, and show them all while the game's window is open (not minimised)."""
+        windows where they were put, and show them all while the game's window is open (not minimised).
+        It runs again and again: one failed round is logged, and the next round tries afresh."""
+        try:
+            self.follow_once()
+        except Exception as e:
+            if str(e) != getattr(self, "_follow_error", None):
+                self._follow_error = str(e)
+                log_error(f"follow: {e.__class__.__name__}: {e}")
+        self.root.after(300, self.follow)
+
+    def follow_once(self) -> None:
         unlocked = self.opts["unlocked"]
         if unlocked and not self.msgs.edit and not self.grip:
             self.place(self.free_rect())
@@ -2378,7 +2389,6 @@ class ChatPanel(ChatView):
             self.show(visible)
             for w in self.windows:  # a split goes with the panel; a window is never over the game's chat
                 w.show(visible if w.docked and w.host is self else up and not self.user_hidden)
-        self.root.after(300, self.follow)
 
     def toggle_see_through(self) -> None:
         self.opts["see_through"] = not self.opts["see_through"]

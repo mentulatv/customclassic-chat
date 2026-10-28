@@ -101,7 +101,8 @@ class Overlay:
         self.click_through(click_through)
         self.root.after(2000, self.keep_on_top)
 
-    def place(self, x: int, y: int, width: int, height: int) -> None:
+    def place(self, x: float, y: float, width: float, height: float) -> None:
+        x, y, width, height = (int(round(v)) for v in (x, y, width, height))  # Tk takes whole pixels only
         if (x, y, width, height) != (self.root.winfo_x(), self.root.winfo_y(), self.width, self.height):
             self.width, self.height = width, height
             self.root.geometry(f"{width}x{height}+{x}+{y}")
