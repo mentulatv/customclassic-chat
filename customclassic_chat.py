@@ -1171,7 +1171,13 @@ class ChatView:
 
     def on_motion(self, e) -> None:
         """While adjusting, the pointer shows what a press would do there."""
-        cursor = self.CURSORS[self.edit_zone(e.x_root, e.y_root)] if self.msgs.edit else ""
+        if self.msgs.edit:
+            cursor = self.CURSORS[self.edit_zone(e.x_root, e.y_root)]
+        else:  # the ≡ grip and the tab row's top edge show they resize, like the game chat's top
+            on_strip = e.widget is self.strip.canvas
+            cursor = "sb_v_double_arrow" if on_strip and (e.x < strip_height(self.line) + 4 or e.y < 4) else ""
+        if self.grip:
+            return
         for w in (self.msgs, self.strip):
             w.canvas.configure(cursor=cursor)
 
@@ -1231,10 +1237,6 @@ class ChatView:
         if self.msgs.edit:  # adjusting: the tab row moves the window, its top edge and corners resize it
             self.start_edit_drag(e)
             return
-        sh = strip_height(self.line)
-        if e.x < sh + 4:  # the ≡ grip: drag up or down to resize, like the game's chat
-            self.grip = (e.y_root, self.opts["extra"], self.panel_now())
-            return
         for name, x0, x1 in self.buttons():
             if x0 - 2 <= e.x < x1 + 2:
                 if name == "close":
@@ -1243,8 +1245,17 @@ class ChatView:
                 {"see": self.toggle_see_through, "split": self.app.add_split, "warn": self.dismiss_warning}[name]()
                 self.render()
                 return
+        # anywhere else on the tab row: dragged up or down it resizes, like the game's chat (the ≡ grip
+        # too); let go without dragging and it was a click on a tab
+        self.grip = (e.y_root, self.opts["extra"], self.panel_now())
+        self.grip_moved = False
+        self.grip_x = e.x
+
+    GRIP_SLOP = 4  # pixels the pointer moves up or down before a press on the tab row is a resize
+
+    def pick_tab(self, x: int) -> None:
         for name, x0, x1 in self.tab_spans():
-            if x0 <= e.x < x1:
+            if x0 <= x < x1:
                 self.log.select(name)
                 self.scroll = 0
                 self.tab_chosen(name)
@@ -1300,6 +1311,12 @@ class ChatView:
         if self.drag:
             self.edit_drag(e)
             return
+        if self.grip and not self.grip_moved:
+            if abs(e.y_root - self.grip[0]) < self.GRIP_SLOP:
+                return
+            self.grip_moved = True
+            for w in (self.msgs, self.strip):
+                w.canvas.configure(cursor="sb_v_double_arrow")
         if self.grip and self.is_free:  # grows upward from its bottom, like the game's chat
             y0, _, p = self.grip
             bottom = p["top"] + p["height"]
@@ -1312,6 +1329,12 @@ class ChatView:
         self.drag = None
         if self.grip:
             self.grip = None
+            for w in (self.msgs, self.strip):
+                w.canvas.configure(cursor="")
+            if not self.grip_moved:  # a click, not a drag
+                if self.grip_x >= strip_height(self.line) + 4:  # (the ≡ grip itself isn't a tab)
+                    self.pick_tab(self.grip_x)
+                return
             if self.is_free:
                 self.keep(self.panel_now())
             save_settings(self.opts)
