@@ -1404,7 +1404,7 @@ class ChatView:
             self.start_edit_drag(e)
             return
         if self.in_corner(e.x):  # the corner grip: drag to resize, the bottom-left corner stays
-            self.grip = (e.x_root, e.y_root, self.opts["extra"], self.panel_now())
+            self.grip = (e.x_root, e.y_root, self.opts["extra"], self.sizer().placed())
             return
         if e.x < strip_height(self.line) + 4:  # ≡: the menu, opened as the button is let go
             self.menu_on_release = True
@@ -1430,8 +1430,15 @@ class ChatView:
         self.render()
 
     def can_resize(self) -> bool:
-        """Whether the corner grip shows: on what can move (a split's divider sizes it)."""
-        return self.movable()
+        """Whether the corner grip shows: on what can move (on a window's split: the window's frame,
+        and then only there, at the frame's top)."""
+        framed = self is not self.app and not getattr(self, "docked", False) and self.split_of() is not None
+        return self.sizer().movable() and not framed
+
+    def sizer(self):
+        """What the corner grip and the tab row resize: this window, or for the split of an extra
+        window, that window's whole frame (the split stays inside it)."""
+        return self
 
     def movable(self) -> bool:
         """Whether it can be moved and resized: not the panel fixed on the game's chat, not a split."""
@@ -1512,16 +1519,19 @@ class ChatView:
             self.edit_drag(e)
             return
         press = getattr(self, "bar_press", None)
+        target = self.sizer()
         if press and not self.grip:  # the tab row, dragged: from now on a resize from the top
-            if abs(e.y_root - press[2]) < self.BAR_SLOP or getattr(self, "docked", False):
+            # (not on the split of the main chat, nor on a window's lower pane: the divider is there)
+            if abs(e.y_root - press[2]) < self.BAR_SLOP or (getattr(self, "docked", False) and target is self) \
+                    or (target is self and self.split_of() is not None and self is not self.app):
                 return
-            self.grip = (press[1], press[2], self.opts["extra"], self.placed())
-        if self.grip and self.is_free:  # wider to the right, taller upward: the bottom-left corner stays
+            self.grip = (press[1], press[2], self.opts["extra"], target.placed())
+        if self.grip and target.is_free:  # wider to the right, taller upward: the bottom-left corner stays
             x0, y0, _, p = self.grip
             bottom = p["top"] + p["height"]
             w = p["width"] if press else max(200, p["width"] + (e.x_root - x0))  # (the tab row: height only)
-            h = max(2 * round(self.line) + strip_height(self.line), p["height"] + (y0 - e.y_root))
-            self.place({**p, "top": bottom - h, "height": h, "width": w})
+            h = max(2 * (2 * round(self.line) + strip_height(self.line)), p["height"] + (y0 - e.y_root))
+            target.place({**p, "top": bottom - h, "height": h, "width": w})
         elif self.grip:  # on the game's chat its width is the chat's: only taller, like the game's
             self.grip_on_chat(e)
 
@@ -1537,8 +1547,9 @@ class ChatView:
             return
         if self.grip:
             self.grip = None
-            if self.is_free:
-                self.keep(self.placed())  # as just put: Windows reports the move a moment later
+            target = self.sizer()
+            if target.is_free:
+                target.keep(target.placed())  # as just put: Windows reports the move a moment later
             save_settings(self.opts)
 
     # scrolling, like the game's chat ---------------------------------------
@@ -1837,6 +1848,12 @@ class ExtraChat(ChatView):
             return
         y0, h0, m0, extra0 = self.div_drag
         app, host, line, sh = self.app, self.host, self.line, strip_height(self.line)
+        if host is not app:  # inside a window's frame: the frame stays, the line between moves
+            h0 = host.split_height(m0)
+            h = max(sh + 2 * round(line) + self.DIV, min(m0["height"] - sh - 2 * round(line), h0 + e.y_root - y0))
+            self.conf["height"], self.conf["share"] = h, h / m0["height"]
+            host.place(m0)
+            return
         d = max(sh + 2 * round(line) + self.DIV - h0, e.y_root - y0)
         d = min(d, m0["height"] - sh - 2 * round(line))
         self.conf["height"] = h0 + d
@@ -1906,9 +1923,17 @@ class ExtraChat(ChatView):
     # a split: its divider under it, as part of it --------------------------------
 
     def place(self, r: dict) -> None:
+        """A window's place is its frame: with a split, the split takes the top of it (its share
+        of the height) and the window the rest. A split is placed by its window."""
         if not self.div:
-            ChatView.place(self, r)
-            self.place_splits()
+            split = self.split_of()
+            self.frame = dict(r) if split is not None else None
+            if split is None:
+                ChatView.place(self, r)
+                return
+            h = self.split_height(r)
+            ChatView.place(self, {**r, "top": r["top"] + h, "height": r["height"] - h})
+            split.place({**r, "height": h})
             return
         d = self.DIV
         ChatView.place(self, {**r, "height": r["height"] - d})
@@ -1918,6 +1943,23 @@ class ExtraChat(ChatView):
     def panel_now(self) -> dict:
         p = ChatView.panel_now(self)
         return {**p, "height": p["height"] + self.DIV} if self.div else p
+
+    def placed(self) -> dict:
+        """Where it was last put: for a window with a split, the whole frame."""
+        frame = getattr(self, "frame", None)
+        return dict(frame) if frame and not self.docked and self.split_of() is not None else ChatView.placed(self)
+
+    def split_height(self, frame: dict) -> int:
+        """The split's part of a frame: its share of the height (as last set), within reason."""
+        split = self.split_of()
+        least = 2 * round(self.line) + strip_height(self.line) + self.DIV
+        share = split.conf.get("share")
+        h = round(frame["height"] * share) if share else int(split.conf.get("height") or 120)
+        return max(least, min(frame["height"] - least, h))
+
+    def sizer(self):
+        host = self.host if self.docked else None
+        return host if host is not None and host is not self.app else self
 
     @property
     def hwnds(self) -> set:
@@ -1936,6 +1978,8 @@ class ExtraChat(ChatView):
 
     def follow(self) -> None:
         if self.docked:
+            if self.host is not self.app:  # a window's split: the window places it, inside its frame
+                return
             if not self.grip:
                 p, host = self.host.placed(), self.host
                 h = int(self.conf.get("height") or 120)
@@ -1959,59 +2003,37 @@ class ExtraChat(ChatView):
         self.msgs.root.destroy()
 
 
-class NormalChat:
-    """A chat in a regular window, with a title bar (minimise, maximise, close), to keep beside
-    the game rather than on it: its own tab, size and place, remembered between restarts."""
+class ChatPane:
+    """One pane of a normal window: its own row of tabs over its messages."""
 
-    MAX_SHOWN = 500  # the newest messages it shows
-
-    def __init__(self, app, conf: dict):
+    def __init__(self, win: "NormalChat", conf: dict):
         import tkinter as tk
-        self.app, self.conf = app, conf
+        self.win, self.conf, app = win, conf, win.app
         self.log = app.log.view_of(conf.get("tab") or "All")
-        top = self.top = tk.Toplevel(app.root)
-        top.title("CustomClassic Chat")
-        top.configure(bg=PANEL)
-        try:
-            top.iconbitmap(str(app.icon_path()))
-        except Exception:
-            pass
-        top.geometry(conf.get("geometry") or "560x340+120+120")
-        top.minsize(260, 140)
-        top.protocol("WM_DELETE_WINDOW", lambda: app.close_normal(self))
-        top.bind("<Configure>", self.moved)
-        self.bar = tk.Frame(top, bg=STRIP)
+        self.frame = tk.Frame(win.paned, bg=PANEL)
+        self.bar = tk.Frame(self.frame, bg=STRIP)
         self.bar.pack(fill="x")
-        body = tk.Frame(top, bg=PANEL)
+        body = tk.Frame(self.frame, bg=PANEL)
         body.pack(fill="both", expand=True)
         scroll = tk.Scrollbar(body)
         scroll.pack(side="right", fill="y")
-        self.text = tk.Text(body, bg=self.app.opts["panel_bg"] or PANEL, fg=INK, wrap="word", relief="flat",
-                            padx=8, pady=6, cursor="arrow", yscrollcommand=scroll.set, highlightthickness=0)
+        self.text = tk.Text(body, bg=app.opts["panel_bg"] or PANEL, fg=INK, wrap="word", relief="flat", padx=8,
+                            pady=6, cursor="arrow", yscrollcommand=scroll.set, highlightthickness=0, height=4)
         self.text.pack(side="left", fill="both", expand=True)
         scroll.configure(command=self.text.yview)
         for w in (self.text, self.bar):
-            w.bind("<Button-3>", self.menu)
+            w.bind("<Button-3>", lambda e: win.menu(e, self))
         self.drawn = None
-        self.render()
-
-    def moved(self, e=None) -> None:
-        if e is not None and e.widget is not self.top or self.top.state() != "normal":
-            return
-        geometry = self.top.geometry()
-        if geometry != self.conf.get("geometry"):
-            self.conf["geometry"] = geometry
-            save_settings(self.app.opts)
 
     def pick(self, name: str) -> None:
         self.log.select(name)
         self.conf["tab"] = name
-        save_settings(self.app.opts)
+        save_settings(self.win.app.opts)
         self.render()
 
     def render(self) -> None:
         import tkinter as tk
-        app = self.app
+        app = self.win.app
         tabs = [name for name, _ in self.log.tabs]
         if self.drawn != (tuple(tabs), self.log.tab):  # the tab row, when it changed
             for child in self.bar.winfo_children():
@@ -2027,7 +2049,7 @@ class NormalChat:
         at_end = t.yview()[1] >= 0.999
         t.configure(state="normal", font=app.font, bg=app.opts["panel_bg"] or PANEL)
         t.delete("1.0", "end")
-        for m in self.log.visible()[-self.MAX_SHOWN:]:
+        for m in self.log.visible()[-NormalChat.MAX_SHOWN:]:
             fg = app.opts["colors"].get(m["kind"]) or m.get("fg") or COLORS[m["kind"]]
             tag = f"{fg}|{m.get('bg') or ''}"
             t.tag_configure(tag, foreground=fg, background=m.get("bg") or "")
@@ -2037,11 +2059,91 @@ class NormalChat:
         if at_end:
             t.see("end")
 
-    def menu(self, e) -> None:
+
+class NormalChat:
+    """A chat in a regular window, with a title bar (minimise, maximise, close), to keep beside
+    the game rather than on it: its own size and place, remembered between restarts. Split, it
+    holds panes stacked inside it, each with its own tabs; the line between two can be dragged."""
+
+    MAX_SHOWN = 500  # the newest messages a pane shows
+
+    def __init__(self, app, conf: dict):
+        import tkinter as tk
+        self.app, self.conf = app, conf
+        conf.setdefault("panes", [])  # the panes above the window's own (top first): each its tab
+        top = self.top = tk.Toplevel(app.root)
+        top.title("CustomClassic Chat")
+        top.configure(bg=PANEL)
+        try:
+            top.iconbitmap(str(app.icon_path()))
+        except Exception:
+            pass
+        top.geometry(conf.get("geometry") or "560x340+120+120")
+        top.minsize(260, 140)
+        top.protocol("WM_DELETE_WINDOW", lambda: app.close_normal(self))
+        top.bind("<Configure>", self.moved)
+        self.paned = tk.PanedWindow(top, orient="vertical", sashwidth=7, sashrelief="flat", bg=TAB, bd=0)
+        self.paned.pack(fill="both", expand=True)
+        self.paned.bind("<ButtonRelease-1>", lambda e: self.keep_sizes())
+        self.panes = [ChatPane(self, c) for c in conf["panes"]] + [ChatPane(self, conf)]
+        sizes = conf.get("sizes") or []
+        for i, pane in enumerate(self.panes):
+            self.paned.add(pane.frame, minsize=60, stretch="always",
+                           **({"height": sizes[i]} if i < len(sizes) else {}))
+        self.render()
+
+    # what the panel hands its windows
+    def logs(self) -> list:
+        return [pane.log for pane in self.panes]
+
+    @property
+    def log(self):  # the window's own pane (the bottom one)
+        return self.panes[-1].log
+
+    def moved(self, e=None) -> None:
+        if e is not None and e.widget is not self.top or self.top.state() != "normal":
+            return
+        geometry = self.top.geometry()
+        if geometry != self.conf.get("geometry"):
+            self.conf["geometry"] = geometry
+            save_settings(self.app.opts)
+
+    def keep_sizes(self) -> None:
+        """The panes' heights, after the line between two was dragged."""
+        self.conf["sizes"] = [pane.frame.winfo_height() for pane in self.panes]
+        save_settings(self.app.opts)
+
+    def render(self) -> None:
+        for pane in self.panes:
+            pane.render()
+
+    def split(self) -> None:
+        """A new pane on top, with Mega to start with; the window's size stays, the panes share it."""
+        conf = {"tab": "Mega"}
+        self.conf["panes"].insert(0, conf)
+        pane = ChatPane(self, conf)
+        self.panes.insert(0, pane)
+        self.paned.add(pane.frame, before=self.panes[1].frame, minsize=60, stretch="always",
+                       height=max(60, self.top.winfo_height() // 3))
+        pane.render()
+        self.top.after(50, self.keep_sizes)
+
+    def remove(self, pane: ChatPane) -> None:
+        self.paned.forget(pane.frame)
+        pane.frame.destroy()
+        self.panes.remove(pane)
+        self.conf["panes"] = [p for p in self.conf["panes"] if p is not pane.conf]
+        self.top.after(50, self.keep_sizes)
+
+    def menu(self, e, pane: ChatPane) -> None:
         import tkinter as tk
         app = self.app
         m = tk.Menu(self.top, tearoff=0, bg=PANEL, fg=INK, activebackground=TAB_ON, activeforeground=INK)
+        m.add_command(label="Split this window (a pane on top)", command=self.split)
+        if pane is not self.panes[-1]:
+            m.add_command(label="Remove this pane", command=lambda: self.remove(pane))
         m.add_cascade(label="New chat window", menu=app.new_window_menu(m))
+        m.add_separator()
         m.add_command(label="Settings…", command=app.open_settings)
         m.add_separator()
         m.add_command(label="Close this window", command=lambda: app.close_normal(self))
@@ -2347,8 +2449,12 @@ class ChatPanel(ChatView):
                 if name in v.log.unread:
                     v.log.unread[name] = False
         ChatView.render(self)
-        for w in [*self.windows, *self.normal]:
+        for w in self.windows:
             w.log.hidden, w.log.hide_padded = self.log.hidden, self.log.hide_padded
+            w.render()
+        for w in self.normal:
+            for log in w.logs():
+                log.hidden, log.hide_padded = self.log.hidden, self.log.hide_padded
             w.render()
 
     def apply_see_through(self) -> None:
@@ -2408,16 +2514,20 @@ class ChatPanel(ChatView):
             return
         h, p = round(self.line * 5) + 20, host.placed()
         h = min(h, p["height"] // 2)
-        if not (host is self and not self.is_free):  # (on the game's chat, it's re-placed with its split)
-            host.keep({**p, "top": p["top"] + h, "height": p["height"] - h})
-        host.place({**p, "top": p["top"] + h, "height": p["height"] - h})
+        if host is self:
+            if self.is_free:
+                host.keep({**p, "top": p["top"] + h, "height": p["height"] - h})
+            host.place({**p, "top": p["top"] + h, "height": p["height"] - h})
         conf = {"dock": "above", "tab": "Mega", "see_through": False, "height": h}
-        if host is not self:
-            conf["host"] = host.conf["id"]
+        if host is not self:  # an extra window: the split takes the top of its frame, which stays
+            conf["host"], conf["share"] = host.conf["id"], h / p["height"]
         self.opts["windows"].append(conf)
         w = ExtraChat(self, conf)
         self.windows.append(w)
-        w.follow()
+        if host is self:
+            w.follow()
+        else:
+            host.place(p)
         save_settings(self.opts)
         self.settings_changed()
 
@@ -2437,17 +2547,20 @@ class ChatPanel(ChatView):
         split = None if w.docked else w.split_of()
         if split is not None:
             self.close_window(split)
-        if w.docked:
-            host, h = w.host, int(w.conf.get("height") or 0)
-            p = host.placed()
-            if host is self and not self.is_free:
-                self.split_room = 0
-            elif host.is_free:
-                host.keep({**p, "top": p["top"] - h, "height": p["height"] + h})
-            host.place({**p, "top": p["top"] - h, "height": p["height"] + h})
+        host, frame = (w.host, w.host.placed()) if w.docked else (None, None)
         self.windows.remove(w)
         self.opts["windows"] = [c for c in self.opts["windows"] if c is not w.conf]
         w.destroy()
+        if host is not None and host is not self:  # a window's split: the window has its whole frame again
+            host.place(frame)
+            host.keep(frame)
+        elif host is self:  # the panel's split: its room goes back to the panel
+            h = int(w.conf.get("height") or 0)
+            if not self.is_free:
+                self.split_room = 0
+            else:
+                self.keep({**frame, "top": frame["top"] - h, "height": frame["height"] + h})
+                self.place({**frame, "top": frame["top"] - h, "height": frame["height"] + h})
         save_settings(self.opts)
         self.settings_changed()
 
@@ -2532,7 +2645,8 @@ class ChatPanel(ChatView):
                     for w in self.windows:
                         w.log.notice(data)
                     for w in self.normal:
-                        w.log.notice(data)
+                        for log in w.logs():
+                            log.notice(data)
                     if not self.demo:
                         save_message(HISTORY_FILE, data)
                     for v in [self, *self.windows]:  # reading history: keep the same lines in view
@@ -2757,9 +2871,13 @@ class ChatPanel(ChatView):
         old, new = rename
         self.log.set_tabs(self.tabs(), new if old and self.log.tab == old else None)
         self.opts["tab"] = self.log.tab
-        for w in [*self.windows, *self.normal]:
+        for w in self.windows:
             w.log.set_tabs(self.tabs(), new if old and w.log.tab == old else None)
             w.conf["tab"] = w.log.tab
+        for w in self.normal:
+            for pane in w.panes:
+                pane.log.set_tabs(self.tabs(), new if old and pane.log.tab == old else None)
+                pane.conf["tab"] = pane.log.tab
 
     def twitch_channel(self) -> str | None:
         """The Twitch channel to read: only when opted in and a channel is set."""

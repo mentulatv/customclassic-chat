@@ -108,11 +108,12 @@ stays there, so you always know CustomClassic Chat is running; ◐ makes it see-
 and **Close this window** on an extra window. While moving or resizing, the menu's first entry is **Done: keep it here**. The menu closes when you click elsewhere, move the
 pointer well away from it, or after 10 seconds (Settings → Chat details; 0 keeps it open).
 
-**Split a window:** right-click it → **Split this window** (the tray menu and Settings → Tabs & windows split the main chat). A second pane takes the
-top of that window, as wide as it and moving with it, with its own row of tabs: Mega to start
-with, so megaphones sit above and your chat below. (The main chat keeps covering the game's chat,
-so its split goes above it.) Drag the **divider bar** between the two to give one more room and the
-other less. Right-click it → **Remove the split** gives the room back. A tab open in one pane gets no unread dot in the other.
+**Split a window:** right-click it → **Split this window**. A second pane with its own row of tabs
+(Mega to start with) takes the top of that window, so megaphones sit above and your chat below;
+drag the line between them to share the room, and right-click → **Remove the split** (or **Remove
+this pane** in a normal window) to go back to one. A window and its split are one frame: resize it
+from the top bar or the corner grip and both panes stay inside, keeping their share. (The chat
+anchored on the game's chat box keeps covering the game's chat, so its split takes the top of it.)
 
 **More chat windows:** right-click a chat → **New chat window**, the tray menu, or Settings → Tabs &
 windows. A **normal window** (the default) is an ordinary window with its own tab: move, resize,
