@@ -16,7 +16,7 @@ See-through: clicking ◐ on the tab strip makes the messages 90% see-through an
 through, so the game's own chat shows and can be clicked; clicking it again makes them solid.
 
     start.bat                   (or: pythonw customclassic_chat.py)
-    Ctrl+Alt+F5   adjust: drag to move, drag any edge or corner to resize; press again to save
+    Ctrl+Alt+F5   (if switched on in Settings → Position) move and resize; press again to keep it
     Ctrl+Alt+F3   reset position: back on the game's chat box, fitted again
     Ctrl+Alt+F6   hide / show
     Ctrl+Alt+F7   quit
@@ -84,6 +84,7 @@ DEFAULTS = {
     "tab": "All",
     "settings_page": "Appearance",  # the settings section open last
     "menu_close_s": 10,       # the right-click menu closes after this many seconds (0: stays until clicked away)
+    "adjust_hotkey": False,   # Ctrl+Alt+F5 moves and resizes too (otherwise: right-click → Move or resize…)
     "update_check": True,     # ask GitHub now and then whether a newer version is out, and say so
     "box": None,              # the chat lines relative to the game window: dx, dy (from its bottom), w, h, line, cw, ch
     "extra": 0,               # pixels the panel reaches above the game's chat (dragged with the ≡ grip)
@@ -135,7 +136,8 @@ FONT = "Verdana"
 # (family, kind)
 FONTS = [("Verdana", "sans serif"), ("Segoe UI", "sans serif"), ("Tahoma", "sans serif"),
          ("Georgia", "serif"), ("Times New Roman", "serif"), ("Consolas", "monospace"), ("Courier New", "monospace")]
-HOTKEYS = {1: 0x74, 2: 0x75, 3: 0x76, 4: 0x72}  # Ctrl+Alt+F5 adjust, F6 hide, F7 quit, F3 fit again
+HOTKEYS = {2: 0x75, 3: 0x76, 4: 0x72}  # Ctrl+Alt+F6 hide, F7 quit, F3 fit again
+HK_ADJUST_KEY, ADJUST_VK = 5, 0x74  # Ctrl+Alt+F5 move and resize: only when switched on in Settings
 RECHECK_S = 5  # seconds between looks at whether the game's chat was resized
 HK_EDIT, HK_HIDE, HK_QUIT, HK_FIT = 1, 2, 3, 4
 
@@ -1381,6 +1383,9 @@ class ChatView:
         import tkinter as tk
         app = self.app
         m = tk.Menu(self.msgs.root, tearoff=0, bg=PANEL, fg=INK, activebackground=TAB_ON, activeforeground=INK)
+        if app.adjusting():  # moving and resizing: first, the way to finish
+            m.add_command(label="✓ Done: keep it here", command=lambda: app.on_hotkey(HK_EDIT))
+            m.add_separator()
         split = next((w for w in app.windows if w.docked), None)
         if split is None:
             m.add_command(label="Split the chat (a pane on top)", command=app.add_split)
@@ -1390,7 +1395,9 @@ class ChatView:
         m.add_separator()
         m.add_command(label=("✓ " if self.see_through else "") + "See-through", command=lambda: (
             self.toggle_see_through(), self.render()))
-        m.add_command(label="Move or resize… (Ctrl+Alt+F5)", command=lambda: app.on_hotkey(HK_EDIT))
+        if not app.adjusting():
+            m.add_command(label="Move or resize…" + (" (Ctrl+Alt+F5)" if self.opts["adjust_hotkey"] else ""),
+                          command=lambda: app.on_hotkey(HK_EDIT))
         m.add_command(label="Settings…", command=app.open_settings)
         m.add_separator()
         if not self.closable:  # the chat on the game's chat box: hidden, and Show in the tray brings it back
@@ -1650,7 +1657,8 @@ class ChatView:
             # the banner: what to do, and the key that finishes it, big enough to read at a glance
             text = c.create_text(w // 2, h // 2, justify="center", fill="#ffffff", font=self.hint_font,
                                  width=max(120, w - 60),
-                                 text="Drag to move  ·  drag an edge or corner to resize\nPress Ctrl+Alt+F5 to save")
+                                 text="Drag to move  ·  drag an edge or corner to resize\n"
+                                      "Right-click → Done to keep it here")
             x0, y0, x1, y1 = c.bbox(text)
             box = c.create_rectangle(x0 - 14, y0 - 10, x1 + 14, y1 + 10, fill=ADJUST, outline="#ffffff", width=2)
             c.tag_raise(text, box)
@@ -1880,6 +1888,9 @@ class ChatPanel(ChatView):
             threading.Thread(target=login_listener, args=(self.events,), daemon=True).start()
             self.root.after(15000, self.check_updates)
         threading.Thread(target=overlay.hotkey_thread, args=(self.events, HOTKEYS), daemon=True).start()
+        self.adjust_key_taken = False
+        if opts["adjust_hotkey"]:
+            self.take_adjust_key()
         threading.Thread(target=demo_loop if demo else read_loop, args=(self,), daemon=True).start()
         self.tray = start_tray(self)
         if demo:  # no game: a 4-line panel near the bottom of the main screen
@@ -2114,8 +2125,8 @@ class ChatPanel(ChatView):
         w.place(w.keep_on_screen(conf["free"]))
         w.set_edit(True)
         save_settings(self.opts)
-        self.events.put(("status", "New chat window: drag it anywhere and its corner to resize, then press "
-                                   "Ctrl+Alt+F5 to keep it there. Its ✕ closes it."))
+        self.events.put(("status", "New chat window: drag it anywhere and an edge to resize, then right-click → "
+                                   "Done. Right-click → Close this window closes it."))
         self.settings_changed()
 
     def add_split(self) -> None:
@@ -2290,8 +2301,24 @@ class ChatPanel(ChatView):
             self.render()
         self.root.after(100, self.pump)
 
+    def take_adjust_key(self) -> None:
+        """Ctrl+Alt+F5 for moving and resizing, once it's switched on (its own thread: a hotkey
+        belongs to the thread that registered it)."""
+        import overlay
+        if not self.adjust_key_taken:
+            self.adjust_key_taken = True
+            threading.Thread(target=overlay.hotkey_thread, args=(self.events, {HK_ADJUST_KEY: ADJUST_VK}),
+                             daemon=True).start()
+
+    def adjusting(self) -> bool:
+        return any(v.msgs.edit for v in [self, *self.windows])
+
     def on_hotkey(self, hk: int) -> None:
-        if hk == HK_EDIT:  # adjust every window; pressed again, each keeps where it was put
+        if hk == HK_ADJUST_KEY:  # Ctrl+Alt+F5: only while it's switched on
+            if not self.opts["adjust_hotkey"]:
+                return
+            hk = HK_EDIT
+        if hk == HK_EDIT:  # adjust every window; again (or Done), each keeps where it was put
             views = [self, *self.windows]
             if any(v.msgs.edit for v in views):
                 for v in views:
@@ -2337,8 +2364,8 @@ class ChatPanel(ChatView):
         if on:
             self.opts["free"] = self.opts["free"] or self.panel_now()
             self.set_edit(True)
-            self.events.put(("status", "Unlocked: drag the panel anywhere and its corner to resize, then press "
-                                       "Ctrl+Alt+F5 to keep it there. Reset position puts it back on the game's chat."))
+            self.events.put(("status", "Unlocked: drag the panel anywhere and an edge to resize, then right-click → "
+                                       "Done. Reset position puts it back on the game's chat."))
         else:
             self.set_edit(False)  # leave adjusting without saving it as the game's chat box
         self._where = None

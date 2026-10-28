@@ -236,8 +236,16 @@ class SettingsWindow:
         unlocked = app.settings_vars["unlocked"] = tk.BooleanVar(value=self.opts["unlocked"])
         radio(c, "On the game's chat box", unlocked, False, lambda: app.set_unlocked(False)).pack(fill="x")
         radio(c, "Unlocked: anywhere I put it", unlocked, True, lambda: app.set_unlocked(True)).pack(fill="x")
-        label(c, "When unlocking, drag the panel where you want it and its corner to resize, then press "
-                 "Ctrl+Alt+F5 to keep it there.", soft=True, size=9, wrap=470).pack(fill="x", pady=(6, 0))
+        label(c, "When unlocking, drag the panel where you want it and an edge to resize, then right-click → "
+                 "Done to keep it there.", soft=True, size=9, wrap=470).pack(fill="x", pady=(6, 0))
+        hotkey = tk.BooleanVar(value=self.opts["adjust_hotkey"])
+
+        def set_hotkey():
+            app.set_opt("adjust_hotkey", hotkey.get())
+            if hotkey.get():
+                app.take_adjust_key()
+        check(c, "Ctrl+Alt+F5 also moves and resizes (press it again to keep the place)", hotkey,
+              set_hotkey).pack(fill="x", pady=(8, 0))
 
         c = card(page, "Reset position",
                  "Lost the panel, or moved it off the chat by accident? This puts it back on the game's chat box. "

@@ -103,9 +103,9 @@ resize…, Check for updates, Unlocked (place it anywhere), Reset position, Spli
 See-through, Settings…, Quit.
 
 **Right-click any chat window** (or click its **≡**) for Split the chat or Remove the split, New
-chat window, See-through, **Move or resize…** (Ctrl+Alt+F5), Settings…, and closing: **Close this
+chat window, See-through, **Move or resize…**, Settings…, and closing: **Close this
 window** on an extra window, **Hide the chat** on the main one (the tray icon's **Show** brings it
-back). The menu closes when you click elsewhere, move the
+back). While moving or resizing, the menu's first entry is **Done: keep it here**. The menu closes when you click elsewhere, move the
 pointer well away from it, or after 10 seconds (Settings → Chat details; 0 keeps it open).
 
 **Split the chat:** click **+** at the right end of the tab row (or right-click, the tray menu,
@@ -116,12 +116,12 @@ more room and the other less. Right-click it → **Remove the split** to close i
 
 **More chat windows:** tray menu or Settings → Tabs & windows → **Add a chat window**. Each window
 has its own tab and ◐, and goes anywhere you drag it: next to the game, on another screen. It
-starts in adjust mode; press Ctrl+Alt+F5 to keep it where it is (Ctrl+Alt+F5 later moves all
-windows again). Right-click it → **Close this window** to close it. Windows and splits are remembered between restarts.
+starts in move-and-resize mode; right-click → **Done** keeps it where it is (right-click →
+**Move or resize…** moves it again). Right-click it → **Close this window** to close it. Windows and splits are remembered between restarts.
 
 **Somewhere else entirely:** tick **Unlocked** (tray menu or Settings → Position) and drag the
-panel anywhere, even off the game window or onto another monitor; drag its corner to resize,
-then press Ctrl+Alt+F5 to keep it there. It still reads the game's own chat. If it ever ends up
+panel anywhere, even off the game window or onto another monitor; drag an edge to resize, then
+right-click → **Done** to keep it there. It still reads the game's own chat. If it ever ends up
 out of reach, **Reset position** (tray menu, Settings, or Ctrl+Alt+F3) puts it back on the
 game's chat box, and a panel left on a monitor that's gone comes back to the middle by itself.
 
@@ -129,7 +129,7 @@ game's chat box, and a panel left on a monitor that's gone comes back to the mid
 
 | Keys | Action |
 |---|---|
-| Ctrl+Alt+F5 | Adjust: drag to move, drag any edge or corner to resize, press again to save |
+| Ctrl+Alt+F5 | Move and resize, and again to keep the place. Off to start with: switch it on in Settings → Position |
 | Ctrl+Alt+F3 | Reset position: back on the game's chat box, fitted again |
 | Ctrl+Alt+F6 | Hide / show |
 | Ctrl+Alt+F7 | Quit |
@@ -282,7 +282,7 @@ Chat colours were measured on the Windia world. If a chat type shows in the wron
 - **Nothing shows up:** the game's chat box needs to show some lines. With the game in front,
   press Ctrl+Alt+F3.
 - **It sits slightly wrong, or you can't find it:** tray icon → Reset position (or
-  Ctrl+Alt+F3), or adjust it by hand with Ctrl+Alt+F5.
+  Ctrl+Alt+F3), or right-click → **Move or resize…** to place it by hand.
 - **A yellow border around the game** (Windows 10): that's Windows showing a window is being
   captured. Windows 11 hides it.
 - **Odd words in the chat:** see "Your character names" in Settings. Send a screenshot in an
