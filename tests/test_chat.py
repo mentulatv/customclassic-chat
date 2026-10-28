@@ -398,6 +398,17 @@ def test_the_right_click_menu_closes_once_the_pointer_is_well_away():
     assert mc.pointer_away(menu, (150, 420)) == 160  # well below it: closes
 
 
+def test_moving_a_window_keeps_its_size():
+    placed = []
+    view = SimpleNamespace(drag=("move", 100, 100, {"left": 500, "top": 300, "width": 400, "height": 200}), line=15,
+                           place=placed.append)
+    mc.ChatView.edit_drag(view, SimpleNamespace(x_root=40, y_root=120))  # dragged 60 px left, 20 down
+    assert placed == [{"left": 440, "top": 320, "width": 400, "height": 200}]
+    view.drag = ("e", 100, 100, {"left": 500, "top": 300, "width": 400, "height": 200})
+    mc.ChatView.edit_drag(view, SimpleNamespace(x_root=160, y_root=100))  # the right edge, 60 px right
+    assert placed[-1] == {"left": 500, "top": 300, "width": 460, "height": 200}
+
+
 def test_guild_chat_switches_on_with_its_colour_alone():
     import guild_relay
     import reader

@@ -1275,8 +1275,9 @@ class ChatView:
         dx, dy = e.x_root - x0, e.y_root - y0
         left, top, w, h = r["left"], r["top"], r["width"], r["height"]
         min_w, min_h = 200, 2 * round(self.line) + strip_height(self.line)
-        if zone == "move":
+        if zone == "move":  # (and only that: "move" has an e in it, which isn't the east edge)
             left, top = left + dx, top + dy
+            zone = ""
         if "e" in zone:
             w = max(min_w, w + dx)
         if "w" in zone:
