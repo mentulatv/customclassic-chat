@@ -1716,10 +1716,10 @@ class ChatView:
         y, fits = h - 2 - self.input_height(), 0  # above the typing line on the Guild tab
         # a warning (the game's chat too small, or closed) across the top; closed, it's all there is
         warn = self.warning()
-        band = self.warn_band = (self.tab_font.metrics("linespace") + 8) if warn else 0
+        warn_h = self.warn_band = (self.tab_font.metrics("linespace") + 8) if warn else 0
         if warn and self is self.app and self.app.chat_closed:
             shown = []
-            band = self.warn_band = h
+            warn_h = self.warn_band = h
         for m in reversed(shown[:max(0, end)]):
             star = "★ " if m.get("watch") and self.log.tab != "Watch" else ""
             t = c.create_text(pad, 0, anchor="nw", text=star + line_text(m, self.opts["timestamps"]),
@@ -1737,14 +1737,14 @@ class ChatView:
             if m.get("watch"):  # caught by the watch list: a gold edge
                 c.create_rectangle(0, y - th, 2, y - 1, fill=GOLD, outline="")
             y -= th
-            if y < band:
+            if y < warn_h:
                 break
             fits += 1
         self.in_view = max(1, fits)
-        if band:  # the warning, over the top of the messages
+        if warn:  # the warning, over the top of the messages
             t = c.create_text(pad, 3, anchor="nw", text="⚠ " + warn, fill="#1a1205", font=self.tab_font,
                               width=w - 2 * pad - b)
-            c.tag_raise(c.create_rectangle(0, 0, w - b - 1, band, fill=WARN, outline=""))
+            c.tag_raise(c.create_rectangle(0, 0, w - b - 1, warn_h, fill=WARN, outline=""))
             c.tag_raise(t)
         self.render_scrollbar(bgc, w, h, b, len(shown))
 
