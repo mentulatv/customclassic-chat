@@ -104,8 +104,9 @@ COLORS = {"guild": "#c8b4ff", "discord": "#8ea1f0", "guildsay": "#9fe3b8", "twit
 POPUP = re.compile(r"(?i)\b(?:party|guild|alliance|family)\s+invit\w*\s+from\b|\b(?:trade|friend|buddy)\s+request\s+from\b"
                    r"|\binvited\s+you\b")
 # the game's chat-type list: "/To All(/s)", "/To Buddy(/b)", "/To Group(/gr)", "/To Party(/p)" ... (its words
-# often run on into the chat line beside them, and "All" can read as "AlI")
-CHAT_MENU = re.compile(r"(?i)/\s*to\s*(?:a[l1i|]{2}|buddy|group|party|guild|alliance|spouse|expedition)\b"
+# often run on into the chat line beside them, and "All" can read as "AlI"); the shortcut in brackets after
+# the name tells it from someone typing "/to buddy" in chat
+CHAT_MENU = re.compile(r"(?i)/\s*to\s*(?:a[l1i|]{2}|buddy|group|party|guild|alliance|spouse|expedition)\s*\("
                        r"|\(\s*/\s*(?:s|b|gr|p|g|a)\s*\)")
 
 
