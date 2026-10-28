@@ -31,8 +31,11 @@ if user32:
     user32.GetAncestor.restype = wintypes.HWND
     user32.GetAncestor.argtypes = [wintypes.HWND, ctypes.c_uint]
     user32.GetForegroundWindow.restype = wintypes.HWND
+    user32.SetWindowLongPtrW.restype = ctypes.c_void_p
+    user32.SetWindowLongPtrW.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_void_p]
     user32.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int,
                                     ctypes.c_int, ctypes.c_int, ctypes.c_uint]
+GWLP_HWNDPARENT = -8  # a top-level window's owner
 
 
 def hotkey_thread(events: queue.Queue, keys: dict[int, int]) -> None:
@@ -117,6 +120,10 @@ class Overlay:
         style = user32.GetWindowLongW(self.hwnd, GWL_EXSTYLE)
         user32.SetWindowLongW(self.hwnd, GWL_EXSTYLE, style & ~WS_EX_NOACTIVATE & ~WS_EX_TRANSPARENT)
         user32.SetForegroundWindow(self.hwnd)  # allowed: the click that started this came to us
+
+    def own_by(self, owner: "Overlay") -> None:
+        """Make owner this window's owner: Windows then always keeps this one in front of it."""
+        user32.SetWindowLongPtrW(self.hwnd, GWLP_HWNDPARENT, owner.hwnd)
 
     def has_keyboard(self) -> bool:
         return user32.GetForegroundWindow() == self.hwnd

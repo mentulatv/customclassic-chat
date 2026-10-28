@@ -1130,6 +1130,9 @@ class ChatView:
         for event in ("<ButtonPress>", "<ButtonRelease>"):
             self.back.canvas.bind(event, lambda e: self.restack(), add="+")
         self.msgs.behind.append(self.back)  # and whenever the text window is raised
+        # and above all: the text window is owned by the backdrop, and Windows always keeps an owned
+        # window in front of its owner, so not even a click on the game can put the backdrop over the text
+        self.msgs.own_by(self.back)
         self.strip.canvas.bind("<ButtonPress-1>", self.on_strip_click)
         self.strip.canvas.bind("<B1-Motion>", self.on_grip_drag)
         self.strip.canvas.bind("<ButtonRelease-1>", self.on_grip_release)
