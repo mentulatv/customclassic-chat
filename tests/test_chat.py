@@ -436,6 +436,43 @@ def test_the_game_scrollbar_is_found_from_its_pixels():
 
 
 
+def test_the_chat_is_read_only_when_it_changed_and_paced_to_its_speed():
+    import numpy as np
+    chat = np.zeros((128, 400, 3), np.int16)
+    chat[8:20:2, 10:300] = 230  # lines of text
+    chat[40:52:2, 10:200] = 230
+    assert not mc.chat_changed(chat, chat.copy())
+    scene = chat.copy()
+    scene[100:110, 350:390] += 90  # a little of the game's scene moving behind the see-through background
+    assert not mc.chat_changed(chat, scene)
+    moved = np.roll(chat, -16, axis=0)  # a new line: every line moves up one
+    assert mc.chat_changed(chat, moved)
+    # balanced: soon enough that 8 lines can't scroll away at 3 lines a second (long megaphones take two)
+    pace = mc.ReadPace()
+    assert abs(pace.pause(100, "balanced", 8, 1.0) - (8 / (3.0 * 1.3) - 1.0)) < 0.01
+    assert pace.pause(100, "fastest", 8, 1.0) == 0
+    assert pace.pause(100, "light", 8, 1.0) > pace.pause(100, "balanced", 8, 1.0)
+    for t in range(80, 100, 2):  # a burst busier than assumed: no waiting longer than it allows
+        pace.note(t, 9, 8, False)
+    assert pace.pause(100.5, "balanced", 8, 1.0) == 0  # half a chat of new lines at once: read again at once
+    pace.hurry_until = 0
+    assert pace.pause(100.5, "balanced", 8, 1.0) < 8 / (3.0 * 1.3) - 1.0
+    pace = mc.ReadPace()
+    pace.note(100, 3, 8, True)  # none of the last read's lines still there: lines were missed, so hurry
+    assert pace.pause(130, "light", 8, 1.0) == 0 and pace.pause(170, "light", 8, 1.0) > 0
+    dd = mc.Dedupe()
+    dd.is_new("[19:38] Rowan : hi", 0)
+    dd.is_new("[19:38] Rowan : hi", 1)
+    assert (dd.looked, dd.fresh) == (2, 1)
+
+
+def test_text_recognition_leaves_most_cores_to_the_game():
+    import os
+    import reader
+    assert 1 <= reader.ocr_threads() <= 2
+    assert reader.ocr_threads(3) == min(3, os.cpu_count())
+
+
 def test_guild_chat_switches_on_with_its_colour_alone():
     import guild_relay
     import reader

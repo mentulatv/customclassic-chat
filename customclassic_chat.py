@@ -47,7 +47,7 @@ HERE = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__
 SETTINGS_FILE = HERE / "chat.json"
 CACHE_DIR = HERE / "cache"
 DEFAULTS = {
-    "interval_s": 0.7,        # seconds between reads of the chat
+    "reading_speed": "balanced",  # how eagerly the chat is read: "fastest", "balanced" or "light" (ReadPace)
     "font_px": None,          # message text size in pixels; None: sized from the game's chat lines
     "font_family": "Verdana", # the messages' font, one of FONTS (Settings → Look)
     "font_bold": False,       # the messages in bold
@@ -309,6 +309,7 @@ class Dedupe:
     def __init__(self, minutes: float = 20, compare_last: int = 120):
         self.minutes, self.compare_last = minutes, compare_last
         self.recent: deque[tuple[float, str]] = deque()
+        self.looked = self.fresh = 0  # lines asked about, and how many of them were new, ever
 
     def seed(self, messages, now: float) -> None:
         """Lines already read before a restart (kept in the history as they were read): the
@@ -320,12 +321,14 @@ class Dedupe:
     def is_new(self, text: str, now: float) -> bool:
         from rapidfuzz import fuzz
         key = re.sub(r"[^a-z0-9]", "", text.lower())
+        self.looked += 1
         while self.recent and self.recent[0][0] < now - self.minutes * 60:
             self.recent.popleft()
         for _, seen in list(self.recent)[-self.compare_last:]:
             if key == seen or (len(key) > 8 and fuzz.ratio(key, seen) >= 92):
                 return False
         self.recent.append((now, key))
+        self.fresh += 1
         return True
 
 
@@ -1045,6 +1048,7 @@ def band_right(arr, centers, left: int, start: int, stop: int, backgrounds: dict
 
 CHAR_NAME = re.compile(r"[A-Za-z0-9]{2,12}")  # MapleStory character names: letters and digits
 NAME_EVERY_S = 20  # how often the status bar is read for the character's name
+NAME_KNOWN_S = 90  # and once it's known
 
 
 def character_name(read) -> str:
@@ -1058,7 +1062,7 @@ def character_name(read) -> str:
 
 
 TRACK_EVERY_S = 0.15  # how often the game's scrollbar is looked at, to follow its chat's size
-RECHECK_SLOW_S = 30  # with its scrollbar in sight, how often text recognition checks the line size
+RECHECK_SLOW_S = 90  # with its scrollbar in sight, how often text recognition checks the line size
 BAR_GRACE_S = 3  # the scrollbar out of sight that long (the chat closed?): text recognition looks again
 BAR_HIDDEN_S = 60  # gone for less than this, it's under something, most likely: its size stays meanwhile
 
@@ -1140,6 +1144,7 @@ def track_loop(app) -> None:
     Pictures with the mouse pointer over the scrollbar are passed over, as it hides part of it.
     The scrollbar gone a while (the chat closed, say), the reading loop's slower checks take over."""
     last, same, looked, quick, error = None, 0, None, 0.0, ""
+    keep_pace()  # light work, and the chat should follow at once
     while not app.stop.wait(TRACK_EVERY_S):
         try:
             cap, game, r = app.capture, app.game, app.read_rect
@@ -1189,6 +1194,97 @@ def track_loop(app) -> None:
                 log_error(f"track: {e.__class__.__name__}: {e}")
 
 
+LOOK_EVERY_S = 0.2  # how often a new picture of the game is looked at: has its chat changed since it was read?
+IDLE_READ_S = 15  # read the chat at least this often, changed or not
+# changed: more than this share of its pixels changed by more than this. Measured on a busy chat: a
+# new line changed 12% or more of them, an unchanged chat none (1%: room for a scene behind it)
+CHANGE_STEP, CHANGE_SHARE = 60, 0.01
+READ_STATS = CACHE_DIR / "reading.jsonl"  # what reading costs and how it keeps up, a minute a line
+
+
+def chat_changed(before, now) -> bool:
+    """Has the chat changed between two pictures of it (RGB, int16 arrays)? A new line moves every
+    line up, which changes a lot of its pixels a lot; the game's scene behind its see-through
+    background changes them a little, or few of them."""
+    import numpy as np
+    return float((np.abs(now - before).max(axis=2) > CHANGE_STEP).mean()) > CHANGE_SHARE
+
+
+class ReadPace:
+    """How soon the chat is read again after a read, when it has changed meanwhile: soon enough
+    that it can't have scrolled a whole chat's worth of lines in between at the busiest rate
+    assumed (or seen lately, if busier), and no sooner, so a busy chat isn't read line by line.
+    A read finding half a chat of new lines, or none of the last read's (lines were missed,
+    most likely), and it reads again right away for a while."""
+
+    BURST = {"fastest": None, "balanced": 3.0, "light": 1.2}  # lines a second assumed at the busiest
+    WRAP = 1.3  # long megaphones take two lines
+
+    def __init__(self) -> None:
+        self.arrivals: deque[tuple[float, int]] = deque()  # (when, new lines) of the last 30 s of reads
+        self.hurry_until = 0.0
+
+    def note(self, now: float, new: int, shown: int, gap: bool) -> None:
+        self.arrivals.append((now, new))
+        while self.arrivals and self.arrivals[0][0] < now - 30:
+            self.arrivals.popleft()
+        if gap or (shown and new >= max(2, shown / 2)):
+            self.hurry_until = max(self.hurry_until, now + (60 if gap else 10))
+
+    def rate(self, now: float) -> float:
+        """New lines a second, lately."""
+        if not self.arrivals:
+            return 0.0
+        return sum(n for _, n in self.arrivals) / max(10.0, now - self.arrivals[0][0])
+
+    def pause(self, now: float, speed: str, shown: int, read_s: float) -> float:
+        burst = self.BURST.get(speed, self.BURST["balanced"])
+        if burst is None or now < self.hurry_until or not shown:
+            return 0.0
+        return max(0.0, shown / (max(burst, self.rate(now) * 1.5) * self.WRAP) - read_s)
+
+
+class ReadStats:
+    """What reading the chat costs and how well it keeps up, a minute at a time: a line each in
+    reading.jsonl (the cache folder) to compare settings by, and the last minute for Settings."""
+
+    def __init__(self, path: Path = READ_STATS) -> None:
+        self.path, self.last = path, None
+        self.reset(time.time())
+
+    def reset(self, now: float) -> None:
+        self.start, self.cpu0 = now, time.process_time()
+        self.looks = self.reads = self.new = self.gaps = 0
+        self.read_s = 0.0
+
+    def add(self, read_s: float | None = None, new: int = 0, gap: bool = False) -> None:
+        """A look at a new picture; with read_s, it was read (taking that long)."""
+        self.looks += 1
+        if read_s is not None:
+            self.reads, self.read_s = self.reads + 1, self.read_s + read_s
+            self.new, self.gaps = self.new + new, self.gaps + gap
+
+    def tick(self, now: float, speed: str, shown: int) -> None:
+        if now - self.start < 60:
+            return
+        import os
+        span, cpu = now - self.start, time.process_time() - self.cpu0
+        self.last = {"at": time.strftime("%Y-%m-%d %H:%M"), "speed": speed, "lines_shown": shown,
+                     "looks": self.looks, "reads": self.reads, "read_s": round(self.read_s, 1),
+                     "cpu_cores": round(cpu / span, 2), "cpu_pct": round(cpu / span / (os.cpu_count() or 1) * 100, 1),
+                     "new_lines": self.new, "gaps": self.gaps}
+        try:
+            self.path.parent.mkdir(exist_ok=True)
+            if self.path.exists() and self.path.stat().st_size > 2_000_000:  # a week of play or so: keep the newest
+                kept = self.path.read_text(encoding="utf-8").splitlines()[-6000:]
+                write_atomic(self.path, "\n".join(kept) + "\n")
+            with self.path.open("a", encoding="utf-8") as f:
+                f.write(json.dumps(self.last) + "\n")
+        except OSError:
+            pass
+        self.reset(now)
+
+
 def read_loop(app) -> None:
     """Reads the chat from pictures of the game window; finds the chat box when asked."""
     import reader as core
@@ -1200,6 +1296,10 @@ def read_loop(app) -> None:
     last_name, names = 0.0, deque(maxlen=3)  # the character's name: the same in the last reads wins
     shorts = deque(maxlen=2)  # a short chat's line count, as counted in the last looks
     odd = 0  # looks in a row with the lines another size than the chat's
+    # reading only when the chat changed, paced to how busy it is (ReadPace)
+    pace, stats, looked_at = ReadPace(), ReadStats(), None
+    base, base_box, last_read, next_read, had = None, None, 0.0, 0.0, 0  # the last read: its picture, box, lines
+    import numpy as np
     while not app.stop.is_set():
         t0 = time.time()
         try:
@@ -1228,11 +1328,19 @@ def read_loop(app) -> None:
                             app.events.put(("fit", to_relative({**box, "top": box["top"] + top}, line, c)))
                         app.want_fit = False
                     r = app.read_rect  # client coordinates
-                    if r:
+                    speed = app.opts["reading_speed"]
+                    if r and frame is not looked_at:  # (a new picture comes every 400 ms or so)
+                        looked_at = frame
                         img = frame_image(frame, ox + r["left"], oy + r["top"], ox + r["left"] + r["width"],
                                           oy + r["top"] + r["height"])
-                        if img:
+                        pixels = np.asarray(img, dtype=np.int16) if img else None
+                        box = (r["left"], r["top"], r["width"], r["height"])
+                        moved = pixels is not None and (base is None or base.shape != pixels.shape or
+                                                        chat_changed(base, pixels))
+                        if img and ((moved and t0 >= next_read) or t0 - last_read >= IDLE_READ_S):
+                            seen0, fresh0, w0 = dedupe.looked, dedupe.fresh, time.perf_counter()
                             read = reader.read(img)
+                            read_s = time.perf_counter() - w0
                             # the game drew something over its chat: a party invite or trade request
                             # (its words land among the lines read, before the scene is left out:
                             # the pop-up isn't at the chat's left edge), the chat-type list, or a window
@@ -1247,7 +1355,21 @@ def read_loop(app) -> None:
                             covered = watch.covered(stamped) or popup
                             if covered != app.covered:
                                 app.events.put(("covered", covered))
-                    if r and t0 - last_name > NAME_EVERY_S:  # who's playing: the status bar under the chat
+                            # none of the last read's lines still there: some went by unread, most likely
+                            seen, fresh = dedupe.looked - seen0, dedupe.fresh - fresh0
+                            gap = box == base_box and had > 0 and seen >= 3 and fresh == seen
+                            shown, now = chat_lines(r, app.line), time.time()
+                            pace.note(now, fresh, shown, gap)
+                            next_read = now + pace.pause(now, speed, shown, read_s)
+                            base, base_box, last_read, had = pixels, box, t0, seen
+                            stats.add(read_s, fresh, gap)
+                        else:
+                            stats.add()
+                        stats.tick(t0, speed, chat_lines(r, app.line))
+                        app.read_stats = stats.last
+                    # who's playing: the status bar under the chat (once known, only now and then: a new
+                    # character means logging out and in again)
+                    if r and t0 - last_name > (NAME_KNOWN_S if app.opts["game_name"] else NAME_EVERY_S):
                         last_name = t0
                         img = frame_image(frame, ox + r["left"], oy + r["top"] + r["height"],
                                           ox + r["left"] + r["width"], oy + c["height"])
@@ -1314,7 +1436,7 @@ def read_loop(app) -> None:
                                           "(Details in errors.log, if you report it.)"))
                 log_error(error)
             last_error = error
-        app.stop.wait(max(0.2, app.opts["interval_s"] - (time.time() - t0)))
+        app.stop.wait(LOOK_EVERY_S)
     if capture:
         capture.stop()
 
@@ -2409,6 +2531,7 @@ class ChatPanel:
         self.read_rect = None      # the chat lines in the game's client coordinates
         self.want_fit = not opts["box"]
         self.bar_at = 0.0          # when the game's scrollbar was last seen beside its chat (it's followed by its pixels)
+        self.read_stats = None     # the last minute of reading the chat: what it cost, how it kept up (ReadStats)
         self.user_hidden = False
         self.line = (opts["box"] or {}).get("line") or 24.0
         self.frames, self.normal = [], []
@@ -3185,8 +3308,28 @@ def main(argv: list[str]) -> None:
                 "area (bottom right, maybe behind the ^ arrow).")
         return
     overlay.dpi_aware()
+    give_way()
     ChatPanel(load_settings(), demo="--demo" in argv, always_show="--always-show" in argv,
               verbose="--verbose" in argv).root.mainloop()
+
+
+def give_way() -> None:
+    """Text recognition gives way to the game when the computer is busy: this program runs below
+    normal priority, all but its windows (this thread), which keep normal priority so the chat
+    stays as quick to scroll and click as ever."""
+    import ctypes
+    k32 = ctypes.windll.kernel32
+    k32.GetCurrentProcess.restype = ctypes.c_void_p
+    k32.SetPriorityClass(ctypes.c_void_p(k32.GetCurrentProcess()), 0x4000)  # BELOW_NORMAL_PRIORITY_CLASS
+    keep_pace()
+
+
+def keep_pace() -> None:
+    """This thread back up to normal priority within the program's below-normal class."""
+    import ctypes
+    k32 = ctypes.windll.kernel32
+    k32.GetCurrentThread.restype = ctypes.c_void_p
+    k32.SetThreadPriority(ctypes.c_void_p(k32.GetCurrentThread()), 2)  # THREAD_PRIORITY_HIGHEST: 6 + 2 = normal's 8
 
 
 def message(text: str) -> None:

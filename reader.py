@@ -40,6 +40,7 @@ REREAD_BELOW = 0.8  # lines read with less confidence get their row OCR'd again 
 
 GUILD_CONFIRMED = False  # the guild colour below is a stand-in until the game has guild chat
 FIND_SCALE = 1.5  # zoom for finding the chat box in the lower game window (reading the chat itself uses `scale`)
+OCR_THREADS = 2  # cores text recognition uses at once by default (see ocr_threads)
 
 
 
@@ -73,6 +74,7 @@ class Config:
     colors: dict = field(default_factory=lambda: dict(COLORS))
     backgrounds: dict = field(default_factory=lambda: dict(BACKGROUNDS))
     color_tolerance: int = 45
+    threads: int = 0  # cores text recognition may use at once; 0: a few (see ocr_threads), the rest stay the game's
 
     @classmethod
     def load(cls, path: Path = CONFIG) -> "Config":
@@ -86,6 +88,7 @@ class Config:
             cfg.backgrounds.update(c.get("backgrounds", {}))
             cfg.scale = float(c.get("scale", cfg.scale))
             cfg.min_confidence = float(c.get("min_confidence", cfg.min_confidence))
+            cfg.threads = int(c.get("threads", cfg.threads))
         return cfg
 
 
@@ -111,7 +114,9 @@ class Reader:
         self.cfg = cfg
         from rapidocr import RapidOCR  # imported here so `--help` is instant
         # "error": an empty chat box (game hidden) would otherwise log a warning every frame
-        self.engine = RapidOCR(params={"Global.log_level": "error"}) if _rapid_accepts_params() else RapidOCR()
+        params = {"Global.log_level": "error", "EngineConfig.onnxruntime.intra_op_num_threads": ocr_threads(cfg.threads),
+                  "EngineConfig.onnxruntime.inter_op_num_threads": 1}
+        self.engine = RapidOCR(params=params) if _rapid_accepts_params() else RapidOCR()
 
     def read(self, img: Image.Image) -> list[Line]:
         rgb = img.convert("RGB")
@@ -206,6 +211,16 @@ def _nearest(color, table: dict, tolerance: int) -> str | None:
                 best, dist = name, d
     return best if dist <= tolerance else None
 
+
+
+def ocr_threads(wanted: int = 0) -> int:
+    """How many cores text recognition uses at once: as asked, or by default OCR_THREADS (fewer on
+    a small CPU), leaving the rest to the game. Left to itself it takes every core for each read
+    and spends most of that waiting on itself: on a 16-thread CPU, 2 read the chat as fast as all
+    of them, for a third of the CPU time (4 took twice the CPU of 2 for no gain)."""
+    import os
+    cores = os.cpu_count() or 4
+    return max(1, min(wanted or OCR_THREADS, cores if wanted else max(1, cores // 2)))
 
 
 def _rapid_accepts_params() -> bool:

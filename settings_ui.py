@@ -20,7 +20,7 @@ UI = "Segoe UI"
 # the sidebar, most vital first: what everyone sets, features to turn on, and finer choices
 SECTIONS = [("Basics", ["Appearance", "Position", "Chat", "Watch list"]),
             ("Extras", ["Tabs & windows", "Twitch", "Guild ↔ Discord"]),
-            ("Advanced", ["Look", "Chat details"])]
+            ("Advanced", ["Look", "Chat details", "Performance"])]
 PAGES = [name for _, names in SECTIONS for name in names]
 RENAMED = {"Tabs": "Tabs & windows", "Guild": "Guild ↔ Discord", "Discord": "Guild ↔ Discord",
            "Guild setup": "Guild ↔ Discord",
@@ -150,7 +150,7 @@ class SettingsWindow:
         builders = {"Appearance": self.appearance, "Position": self.position, "Chat": self.chat,
                     "Watch list": self.watch_list, "Tabs & windows": self.tabs, "Twitch": self.twitch,
                     "Guild ↔ Discord": self.discord, "Look": self.look,
-                    "Chat details": self.chat_details}
+                    "Chat details": self.chat_details, "Performance": self.performance}
         for name, build in builders.items():
             page = tk.Frame(self.content, bg=BG)
             label(page, name, size=15, bold=True, bg=BG).pack(fill="x", pady=(0, 14))
@@ -576,6 +576,48 @@ class SettingsWindow:
                    highlightbackground=BORDER, highlightcolor=ACCENT, font=(UI, 10)).pack(side="left", padx=6)
         secs.trace_add("write", set_secs)
         label(row, "seconds (0: until clicked away)", soft=True, size=9).pack(side="left")
+
+    def performance(self, page) -> None:
+        """How eagerly the chat is read (reading takes the most CPU), and what the last minute cost."""
+        app, opts = self.app, self.opts
+        from customclassic_chat import READ_STATS, chat_lines
+        c = card(page, "Reading speed", "The chat is only read when something new shows in the game's chat, so a "
+                                        "quiet chat costs next to nothing whichever you pick.")
+        speed = tk.StringVar(value=opts["reading_speed"])
+        for value, text, hint in [
+                ("fastest", "Fastest", "Reads each new line as soon as it shows. Uses the most CPU in busy places."),
+                ("balanced", "Balanced (recommended)", "In busy places it waits a moment and reads a few new lines at "
+                                                       "once. Keeps up with bursts of about 3 lines a second."),
+                ("light", "Light", "For slower computers: reads less often. Keeps up with about 1 line a second, so "
+                                   "in the busiest places (Free Market, Kerning PQ) a burst of megaphones can scroll "
+                                   "past unread.")]:
+            radio(c, text, speed, value, lambda: app.set_opt("reading_speed", speed.get())).pack(fill="x")
+            label(c, hint, soft=True, size=9, wrap=440).pack(fill="x", padx=(22, 0), pady=(0, 6))
+        tall = label(c, "", soft=True, size=9, wrap=470)
+        tall.pack(fill="x", pady=(4, 0))
+
+        c = card(page, "The last minute", f"Kept a minute a line in {READ_STATS.name} (the cache folder), to compare "
+                                          "speeds by.")
+        last = label(c, "", wrap=470)
+        last.pack(fill="x")
+
+        def refresh():
+            if not last.winfo_exists():
+                return
+            n = chat_lines(app.read_rect, app.line)
+            tall.configure(text=f"The game's chat shows {n} lines. A taller chat lets any speed miss less, as more "
+                                "lines fit between two reads." if n else "")
+            s = app.read_stats
+            if s:
+                missed = f"{s['gaps']} time{'s' if s['gaps'] != 1 else ''} lines may have scrolled past unread" \
+                    if s["gaps"] else "nothing missed, as far as it can tell"
+                last.configure(text=f"Read the chat {s['reads']} times ({s['looks'] - s['reads']} looks found nothing "
+                                    f"new) and found {s['new_lines']} new lines; {missed}.\nThe whole program used "
+                                    f"{s['cpu_cores']:.1f} CPU cores on average ({s['cpu_pct']:.0f}% of this computer).")
+            else:
+                last.configure(text="Shows here after a minute with the game's chat in view.")
+            last.after(2000, refresh)
+        refresh()
 
     def watch_list(self, page) -> None:
         app, opts = self.app, self.opts
