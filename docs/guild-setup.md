@@ -19,11 +19,11 @@ You need to be an admin of the Discord server, and a text channel for guild chat
 `#guild`. If it's a private channel, give the bot **View Channel**, **Send Messages**, **Read
 Message History** and **Manage Messages** (to pin the code) there after adding it.
 
-1. **Add the bot.** In CustomClassic Chat: *Settings → Guild setup → Add the CustomClassic Chat bot
-   to your server*. Pick your server and choose **Add to Server**. Don't choose *Add to My Apps*:
+1. **Add the bot.** In CustomClassic Chat: *Settings → Guild ↔ Discord → Add the bot to your
+   server* (the last box on the page). Pick your server and choose **Add to Server**. Don't choose *Add to My Apps*:
    that doesn't put the bot in your server.
 
-   ![Settings → Guild setup](settings-guild-setup.png)
+   ![Settings → Guild ↔ Discord](settings-guild.png)
 
 2. **Bind the bot to the channel.** In the guild chat channel, type `/bind` and your guild's name
    in the game. The bot makes the guild code (like `ABCD-EFGH-JKLM`), then posts and pins in the

@@ -156,7 +156,7 @@ The sidebar comes in three layers, most vital first:
 - **Tabs & windows:** a tab of your own (its name, and which of map chat, whispers, party,
   buddy/guild, megaphones, system messages and watch-list catches it shows), splitting the
   chat, and extra chat windows
-- **Twitch**, **Guild ↔ Discord** and **Guild setup** (below)
+- **Twitch** and **Guild ↔ Discord** (below)
 
 **Advanced**, finer choices with good defaults:
 - **Look:** the font (seven hand-picked: sans serif, serif and monospace) and **bold**, the
@@ -182,8 +182,8 @@ apps share it with each other.
 
 **[Step-by-step guide, with pictures →](docs/guild-setup.md)**
 
-**Setting up (once, by the server's admins):** *Settings → Guild setup → Add the CustomClassic
-Chat bot to your server* (choose **Add to Server**), then type `/bind` in the channel for guild
+**Setting up (once, by the server's admins):** *Settings → Guild ↔ Discord → Add the bot to
+your server* (choose **Add to Server**), then type `/bind` in the channel for guild
 chat. The bot makes the **guild code** (`ABCD-EFGH-JKLM`) and posts and pins it there. Only admins
 can `/bind` and `/unbind`. Guilds that would rather not use the shared bot can use *Own guild
 setup* (Advanced) with a webhook and, optionally, their own bot.
