@@ -911,9 +911,25 @@ def start_tray(app):
     return icon
 
 
-def frame_image(frame, x0: int, y0: int, x1: int, y1: int):
+ERROR_LOG = HERE / "errors.log"
+
+
+def log_error(text: str) -> None:
+    """A problem's details, with the time and version, for a bug report (kept short)."""
+    import traceback
+    import updates
+    try:
+        old = ERROR_LOG.read_text(encoding="utf-8")[-20000:] if ERROR_LOG.exists() else ""
+        ERROR_LOG.write_text(old + f"{time.strftime('%Y-%m-%d %H:%M:%S')} v{updates.VERSION} {text}\n"
+                             + traceback.format_exc() + "\n", encoding="utf-8")
+    except OSError:
+        pass
+
+
+def frame_image(frame, x0: float, y0: float, x1: float, y1: float):
     from PIL import Image
-    crop = frame[max(0, y0):max(0, y1), max(0, x0):max(0, x1), :3][:, :, ::-1]  # BGRA -> RGB
+    x0, y0, x1, y1 = (max(0, int(round(v))) for v in (x0, y0, x1, y1))  # pixels: whole numbers
+    crop = frame[y0:y1, x0:x1, :3][:, :, ::-1]  # BGRA -> RGB
     return Image.fromarray(crop.copy()) if crop.size else None
 
 
@@ -1131,10 +1147,12 @@ def read_loop(app) -> None:
                                 app.events.put(("fit", to_relative({**new, "bar": app.bar_px}, app.line, c)))
                         elif lost >= 3 and not app.covered:
                             app.want_fit, lost = True, 0  # no chat where it should be for 15 s: look for it afresh
-        except Exception as e:  # keep reading through a bad frame; say so once
-            error = f"Skipped a read ({e.__class__.__name__}: {e})"[:120]
+        except Exception as e:  # keep reading through a bad frame: say so once in plain words, the
+            error = f"{e.__class__.__name__}: {e}"  # details go to errors.log for a bug report
             if error != last_error:
-                app.events.put(("status", error))
+                app.events.put(("status", "Couldn't read the game's chat for a moment; still trying. "
+                                          "(Details in errors.log, if you report it.)"))
+                log_error(error)
             last_error = error
         app.stop.wait(max(0.2, app.opts["interval_s"] - (time.time() - t0)))
     if capture:
