@@ -1286,8 +1286,9 @@ class ChatView:
     # placing ----------------------------------------------------------------
 
     def place(self, r: dict) -> None:
-        """The whole window inside r: the tab strip as its top line, the messages below it."""
-        sh = strip_height(self.line)
+        """The whole window inside r: the tab strip as its top line (or lines, when its tabs wrap),
+        the messages below it."""
+        sh = strip_height(self.line) * self.strip_rows(int(r["width"]))
         where = (r["left"], r["top"], r["width"], r["height"], sh)
         if where == self._where:
             return
@@ -1332,14 +1333,15 @@ class ChatView:
         if self.msgs.edit:
             cursor = self.CURSORS[self.edit_zone(e.x_root, e.y_root)]
         else:  # the corner grip shows it resizes
-            cursor = "size_ne_sw" if e.widget is self.strip.canvas and self.in_corner(e.x) else ""
+            cursor = "size_ne_sw" if e.widget is self.strip.canvas and self.in_corner(e.x, e.y) else ""
         if self.grip:
             return
         for w in (self.msgs, self.strip):
             w.canvas.configure(cursor=cursor)
 
     def start_edit_drag(self, e) -> None:
-        self.drag = (self.edit_zone(e.x_root, e.y_root), e.x_root, e.y_root, self.placed())
+        target = self.sizer()  # (a window's split: the window's whole frame)
+        self.drag = (target.edit_zone(e.x_root, e.y_root), e.x_root, e.y_root, target.placed())
 
     def edit_drag(self, e) -> None:
         """Move, or resize from the edge or corner grabbed; the opposite side stays put."""
@@ -1360,7 +1362,7 @@ class ChatView:
         if "n" in zone:
             h2 = max(min_h, h - dy)
             top, h = top + h - h2, h2
-        self.place({"left": left, "top": top, "width": w, "height": h})
+        self.sizer().place({"left": left, "top": top, "width": w, "height": h})
 
     def keep_on_screen(self, free: dict) -> dict:
         """A place put somewhere that's off every monitor (one unplugged since) comes back to the
@@ -1391,39 +1393,53 @@ class ChatView:
 
     # the tab strip ----------------------------------------------------------
 
-    def tab_spans(self) -> list[tuple[str, int, int]]:
-        x, out, pad = strip_height(self.line) + 6, [], 10  # after the ≡ grip
+    def tab_spans(self, width: int | None = None) -> list[tuple[str, int, int, int]]:
+        """The tabs as (name, x0, x1, row): the first row after the ≡ and before the buttons, and
+        when the window is too narrow for them all, the rest on more rows under it."""
+        width = width or self.strip.width
+        rh, pad = strip_height(self.line), 10
+        buttons = self.buttons(width)
+        first_end = (min(x0 for _, x0, _ in buttons) if buttons else width) - 4
+        x, row, out = rh + 6, 0, []  # after the ≡ grip
         for name, _ in self.log.tabs:
             w = self.tab_font.measure(name) + 2 * pad
-            out.append((name, x, x + w))
+            end = first_end if row == 0 else width - 4
+            if x + w > end and out and out[-1][3] == row:  # no room left on this row: the next one
+                row, x = row + 1, 6
+            out.append((name, x, x + w, row))
             x += w + 3
         return out
+
+    def strip_rows(self, width: int) -> int:
+        return 1 + max((row for *_, row in self.tab_spans(width)), default=0)
 
     def on_strip_click(self, e) -> None:
         if self.msgs.edit:  # adjusting: the tab row moves the window, its top edge and corners resize it
             self.start_edit_drag(e)
             return
-        if self.in_corner(e.x):  # the corner grip: drag to resize, the bottom-left corner stays
+        rh = strip_height(self.line)
+        if self.in_corner(e.x, e.y):  # the corner grip: drag to resize, the bottom-left corner stays
             self.grip = (e.x_root, e.y_root, self.opts["extra"], self.sizer().placed())
             return
-        if e.x < strip_height(self.line) + 4:  # ≡: the menu, opened as the button is let go
+        if e.x < rh + 4 and e.y < rh:  # ≡: the menu, opened as the button is let go
             self.menu_on_release = True
             return
         for name, x0, x1 in self.buttons():
-            if x0 - 2 <= e.x < x1 + 2:
+            if x0 - 2 <= e.x < x1 + 2 and e.y < rh:
                 {"see": self.toggle_see_through, "split": lambda: self.app.add_split(self),
                  "warn": self.dismiss_warning}[name]()
                 self.render()
                 return
         # anywhere else on the tab row: dragged up or down it resizes from the top (taller or
         # shorter, the bottom stays); let go without dragging and it was a click on a tab
-        self.bar_press = (e.x, e.x_root, e.y_root)
+        self.bar_press = (e.x, e.x_root, e.y_root, e.y)
 
     BAR_SLOP = 4  # pixels the pointer moves up or down before a press on the tab row is a resize
 
-    def pick_tab(self, x: int) -> None:
-        for name, x0, x1 in self.tab_spans():
-            if x0 <= x < x1:
+    def pick_tab(self, x: int, y: int = 0) -> None:
+        row = int(y // strip_height(self.line))
+        for name, x0, x1, r in self.tab_spans():
+            if x0 <= x < x1 and r == row:
                 self.log.select(name)
                 self.scroll = 0
                 self.tab_chosen(name)
@@ -1445,10 +1461,10 @@ class ChatView:
         return True
 
     def corner_px(self) -> int:
-        return self.strip.height - 4 if self.can_resize() else 0
+        return strip_height(self.line) - 4 if self.can_resize() else 0
 
-    def in_corner(self, x: int) -> bool:
-        return self.can_resize() and x >= self.strip.width - self.corner_px() - 4
+    def in_corner(self, x: int, y: int = 0) -> bool:
+        return self.can_resize() and x >= self.strip.width - self.corner_px() - 4 and y < strip_height(self.line)
 
     BUTTON_TEXT = {"see": "◐", "split": "+"}
 
@@ -1465,11 +1481,11 @@ class ChatView:
         if split is not None:
             split.follow()
 
-    def buttons(self) -> list[tuple[str, int, int]]:
-        """The buttons at the right end of the tab strip (left of the corner grip), right to left, as
-        (name, x0, x1): ◐, + to split the chat (while it isn't), and the ⚠ when there is one."""
-        s = self.strip.height - 4
-        x = self.strip.width - s - 4 - (self.corner_px() + 4 if self.can_resize() else 0)
+    def buttons(self, width: int | None = None) -> list[tuple[str, int, int]]:
+        """The buttons at the right end of the tab strip's first row (left of the corner grip),
+        right to left, as (name, x0, x1): ◐, and the ⚠ when there is one."""
+        s = strip_height(self.line) - 4
+        x = (width or self.strip.width) - s - 4 - (self.corner_px() + 4 if self.can_resize() else 0)
         names = ["see"] + (["warn"] if self.warning() else [])
         out = []
         for name in names:
@@ -1543,7 +1559,7 @@ class ChatView:
             return
         press, self.bar_press = getattr(self, "bar_press", None), None
         if press and not self.grip:  # a click on the tab row, not a drag
-            self.pick_tab(press[0])
+            self.pick_tab(press[0], press[3])
             return
         if self.grip:
             self.grip = None
@@ -1687,20 +1703,22 @@ class ChatView:
         self.stop_typing()
 
     def render_strip(self) -> None:
-        c, h = self.strip.canvas, self.strip.height
+        c, full = self.strip.canvas, self.strip.height
+        h = strip_height(self.line)  # one row (the tabs may wrap onto more)
         c.delete("all")
         g = h - 4  # the ≡ grip
         c.create_rectangle(4, 2, 4 + g, h - 2, fill=TAB, outline="")
         for i in (-1, 0, 1):
             y = h // 2 + 1 + i * max(3, h // 6)
             c.create_line(8, y, g, y, fill=SOFT, width=2)
-        for name, x0, x1 in self.tab_spans():
-            on = name == self.log.tab
-            c.create_rectangle(x0, 2, x1, h, fill=TAB_ON if on else TAB, outline="")
-            c.create_text((x0 + x1) // 2, h // 2 + 1, text=name, fill=INK if on else SOFT, font=self.tab_font)
+        for name, x0, x1, row in self.tab_spans():
+            on, y = name == self.log.tab, row * h
+            c.create_rectangle(x0, y + 2, x1, y + h, fill=TAB_ON if on else TAB, outline="")
+            c.create_text((x0 + x1) // 2, y + h // 2 + 1, text=name, fill=INK if on else SOFT, font=self.tab_font)
             if self.log.unread.get(name):
                 r = max(3, h // 6)
-                c.create_oval(x1 - 2 * r - 2, 3, x1 - 2, 3 + 2 * r, fill=GOLD if name == "Watch" else DOT, outline="")
+                c.create_oval(x1 - 2 * r - 2, y + 3, x1 - 2, y + 3 + 2 * r, fill=GOLD if name == "Watch" else DOT,
+                              outline="")
         for name, x0, x1 in self.buttons():
             if name == "warn":  # quiet: an amber mark, explained once a session; a click puts it away
                 c.create_text((x0 + x1) // 2, h // 2 + 1, text="⚠", fill=WARN, font=self.tab_font)
@@ -1714,7 +1732,7 @@ class ChatView:
             for k in (0.3, 0.6, 0.9):
                 c.create_line(x1 - s * k, 3, x1, 3 + s * k, fill=SOFT, width=2)
         if self.msgs.edit:
-            self.draw_adjust(c, self.strip.width, h, bottom=False)
+            self.draw_adjust(c, self.strip.width, full, bottom=False, edge=self.frame_edges()[0])
 
     def render_messages(self) -> None:
         c, w, h = self.msgs.canvas, self.msgs.width, self.msgs.height
@@ -1777,7 +1795,9 @@ class ChatView:
         if total > self.in_view:
             c.create_rectangle(x0 + 2, top, w - 3, top + size - 1, fill=SB_THUMB, outline=SB_EDGE)
         if self.msgs.edit:
-            self.draw_adjust(c, w, h, bottom=True)
+            self.draw_adjust(c, w, h, bottom=True, edge=self.frame_edges()[1])
+            if not self.frame_edges()[1]:  # a split: the banner is on the window under it
+                return
             # the banner: what to do, and the key that finishes it, big enough to read at a glance
             text = c.create_text(w // 2, h // 2, justify="center", fill="#ffffff", font=self.hint_font,
                                  width=max(120, w - 60),
@@ -1787,12 +1807,19 @@ class ChatView:
             box = c.create_rectangle(x0 - 14, y0 - 10, x1 + 14, y1 + 10, fill=ADJUST, outline="#ffffff", width=2)
             c.tag_raise(text, box)
 
-    def draw_adjust(self, c, w: int, h: int, bottom: bool) -> None:
+    def frame_edges(self) -> tuple[bool, bool]:
+        """Which ends of the adjust outline this window draws: (top on its tab row, bottom under its
+        messages). A window with a split shares one frame with it: the split has the top."""
+        return True, True
+
+    def draw_adjust(self, c, w: int, h: int, bottom: bool, edge: bool = True) -> None:
         """Adjust mode's frame: a dashed outline and a handle in each corner of the window (the tab
-        strip draws the top ones, the messages the bottom ones)."""
+        strip draws the top ones, the messages the bottom ones; edge=False: the sides only)."""
         s = max(10, self.EDGE)
         c.create_line(1, 0 if bottom else 1, 1, h, fill=ADJUST_EDGE, width=2, dash=(6, 3))
         c.create_line(w - 2, 0 if bottom else 1, w - 2, h, fill=ADJUST_EDGE, width=2, dash=(6, 3))
+        if not edge:
+            return
         y = h - 2 if bottom else 1
         c.create_line(0, y, w, y, fill=ADJUST_EDGE, width=2, dash=(6, 3))
         y0 = h - s if bottom else 0
@@ -1838,7 +1865,10 @@ class ExtraChat(ChatView):
             c.create_line(x - 3, h // 2, x + 3, h // 2, fill=INK if hot else SOFT, width=2)
 
     def on_div_press(self, e) -> None:
-        self.div_drag = (e.y_root, int(self.conf.get("height") or 120), self.host.placed(), self.app.opts["extra"])
+        host = self.host
+        frame = host.placed()
+        h0 = host.split_height(frame) if host is not self.app else int(self.conf.get("height") or 120)
+        self.div_drag = (e.y_root, h0, frame, self.app.opts["extra"])  # as it was at the press
 
     def on_div_drag(self, e) -> None:
         """Move the line between the split and the chat: one gets taller as the other gets shorter,
@@ -1849,7 +1879,6 @@ class ExtraChat(ChatView):
         y0, h0, m0, extra0 = self.div_drag
         app, host, line, sh = self.app, self.host, self.line, strip_height(self.line)
         if host is not app:  # inside a window's frame: the frame stays, the line between moves
-            h0 = host.split_height(m0)
             h = max(sh + 2 * round(line) + self.DIV, min(m0["height"] - sh - 2 * round(line), h0 + e.y_root - y0))
             self.conf["height"], self.conf["share"] = h, h / m0["height"]
             host.place(m0)
@@ -1974,7 +2003,22 @@ class ExtraChat(ChatView):
         self.keep(self.placed())
 
     def set_edit(self, on: bool) -> bool:
-        return False if self.docked else ChatView.set_edit(self, on)  # a split goes where the panel goes
+        """Adjust mode: a window and its split together, as one frame; the main chat's split goes
+        where the main chat goes."""
+        if self.docked:
+            return False if self.host is self.app else ChatView.set_edit(self, on)
+        ended = ChatView.set_edit(self, on)
+        split = self.split_of()
+        if split is not None:
+            ChatView.set_edit(split, on)
+        return ended
+
+    def frame_edges(self) -> tuple[bool, bool]:
+        if self.docked and self.host is not self.app:
+            return True, False  # the top of its window's frame
+        if not self.docked and self.split_of() is not None:
+            return False, True  # the bottom of the frame: its split has the top
+        return True, True
 
     def follow(self) -> None:
         if self.docked:
@@ -2011,8 +2055,10 @@ class ChatPane:
         self.win, self.conf, app = win, conf, win.app
         self.log = app.log.view_of(conf.get("tab") or "All")
         self.frame = tk.Frame(win.paned, bg=PANEL)
-        self.bar = tk.Frame(self.frame, bg=STRIP)
+        self.bar = tk.Frame(self.frame, bg=STRIP, height=28)  # its tabs flow onto more rows when narrow
         self.bar.pack(fill="x")
+        self.bar.bind("<Configure>", lambda e: self.flow())
+        self.tab_buttons = []
         body = tk.Frame(self.frame, bg=PANEL)
         body.pack(fill="both", expand=True)
         scroll = tk.Scrollbar(body)
@@ -2031,6 +2077,22 @@ class ChatPane:
         save_settings(self.win.app.opts)
         self.render()
 
+    def flow(self) -> None:
+        """The tabs left to right, onto a new row when the next doesn't fit; the bar as tall as that."""
+        width = self.bar.winfo_width()
+        if width <= 1 or not self.tab_buttons:
+            return
+        x = y = row_h = 0
+        for b in self.tab_buttons:
+            w, h = b.winfo_reqwidth(), b.winfo_reqheight()
+            if x and x + w > width - 2:
+                x, y = 0, y + row_h + 2
+            b.place(x=x + 2, y=y + 2)
+            x, row_h = x + w + 2, max(row_h, h)
+        height = y + row_h + 4
+        if int(self.bar.cget("height")) != height:
+            self.bar.configure(height=height)
+
     def render(self) -> None:
         import tkinter as tk
         app = self.win.app
@@ -2038,13 +2100,16 @@ class ChatPane:
         if self.drawn != (tuple(tabs), self.log.tab):  # the tab row, when it changed
             for child in self.bar.winfo_children():
                 child.destroy()
+            self.tab_buttons = []
             for name in tabs:
                 on = name == self.log.tab
-                tk.Button(self.bar, text=name, relief="flat", bd=0, padx=10, pady=3, cursor="hand2",
-                          bg=TAB_ON if on else TAB, fg=INK if on else SOFT, activebackground=TAB_ON,
-                          activeforeground=INK, font=app.tab_font,
-                          command=lambda n=name: self.pick(n)).pack(side="left", padx=(0, 2), pady=2)
+                b = tk.Button(self.bar, text=name, relief="flat", bd=0, padx=10, pady=3, cursor="hand2",
+                              bg=TAB_ON if on else TAB, fg=INK if on else SOFT, activebackground=TAB_ON,
+                              activeforeground=INK, font=app.tab_font, command=lambda n=name: self.pick(n))
+                b.bind("<Button-3>", lambda e: self.win.menu(e, self))
+                self.tab_buttons.append(b)
             self.drawn = (tuple(tabs), self.log.tab)
+            self.flow()
         t = self.text
         at_end = t.yview()[1] >= 0.999
         t.configure(state="normal", font=app.font, bg=app.opts["panel_bg"] or PANEL)

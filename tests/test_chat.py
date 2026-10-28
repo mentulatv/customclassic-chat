@@ -402,6 +402,7 @@ def test_moving_a_window_keeps_its_size():
     placed = []
     view = SimpleNamespace(drag=("move", 100, 100, {"left": 500, "top": 300, "width": 400, "height": 200}), line=15,
                            place=placed.append)
+    view.sizer = lambda: view
     mc.ChatView.edit_drag(view, SimpleNamespace(x_root=40, y_root=120))  # dragged 60 px left, 20 down
     assert placed == [{"left": 440, "top": 320, "width": 400, "height": 200}]
     view.drag = ("e", 100, 100, {"left": 500, "top": 300, "width": 400, "height": 200})
