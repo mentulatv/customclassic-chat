@@ -91,7 +91,6 @@ python.exe to PATH"), download this repository, double-click **`setup.bat`** onc
 | **≡** (left end) | Opens the menu (the same as right-clicking the chat). |
 | Tabs | Click to switch. A red dot means unread messages; a gold dot on Watch means your watch list caught something. **Drag the tab row up or down** to make the chat taller or shorter from the top (the bottom stays). On the game's chat box, dragged all the way down it sits just under the game chat's top edge, so you can drag that edge to resize the game's chat itself: this chat follows. |
 | **◐** (right end) | See-through: messages 90% see-through and click-through until clicked again. |
-| **+** (next to ◐) | Split this window: a pane on top of it with its own tabs (shown while it isn't split). |
 | **Corner grip** (right end) | Drag to resize: wider to the right, taller upward; the bottom-left corner stays. On extra windows and an unlocked panel: the chat on the game's chat box stays put. |
 | **⚠** (amber) | When the game's chat shows fewer than 3 lines (a long megaphone takes two; 4 or more is best) or is closed: an amber line says so across the top of every chat window, since megaphones arriving together could scroll away unread. With the game's chat closed, the chat on it shrinks to just that line. Make the game's chat taller (drag its top edge: the chat on it follows), or click the warning to put it away. |
 
@@ -102,21 +101,23 @@ wheel. New messages don't pull you down while you're reading back.
 resize…, Check for updates, Unlocked (place it anywhere), Reset position, Split the chat, New chat window,
 See-through, Settings…, Quit.
 
-**Right-click any chat window** (or click its **≡**) for Split this window or Remove the split, New
-chat window, See-through, **Move or resize…** (not on the chat anchored on the game's chat box: it
+**Right-click any chat window** (or click its **≡**) for Split this window or Remove the split,
+**New chat window** (a **Normal window** with a title bar, minimise and close, to keep beside the
+game, or an **Overlay on the game**), See-through, **Move or resize…** (not on the chat anchored on the game's chat box: it
 stays there, so you always know CustomClassic Chat is running; ◐ makes it see-through), Settings…,
 and **Close this window** on an extra window. While moving or resizing, the menu's first entry is **Done: keep it here**. The menu closes when you click elsewhere, move the
 pointer well away from it, or after 10 seconds (Settings → Chat details; 0 keeps it open).
 
-**Split a window:** click **+** at the right end of its tab row, or right-click it → **Split this
-window** (the tray menu and Settings → Tabs & windows split the main chat). A second pane takes the
+**Split a window:** right-click it → **Split this window** (the tray menu and Settings → Tabs & windows split the main chat). A second pane takes the
 top of that window, as wide as it and moving with it, with its own row of tabs: Mega to start
 with, so megaphones sit above and your chat below. (The main chat keeps covering the game's chat,
 so its split goes above it.) Drag the **divider bar** between the two to give one more room and the
 other less. Right-click it → **Remove the split** gives the room back. A tab open in one pane gets no unread dot in the other.
 
-**More chat windows:** tray menu or Settings → Tabs & windows → **Add a chat window**. Each window
-has its own tab and ◐, and goes anywhere you drag it: next to the game, on another screen. It
+**More chat windows:** right-click a chat → **New chat window**, the tray menu, or Settings → Tabs &
+windows. A **normal window** (the default) is an ordinary window with its own tab: move, resize,
+minimise or close it like any other. An **overlay** sits on top of the game like the main chat,
+with its own tab and ◐, and goes anywhere you drag it: next to the game, on another screen. It
 starts in move-and-resize mode; right-click → **Done** keeps it where it is (right-click →
 **Move or resize…** moves it again). Right-click it → **Close this window** to close it. Windows and splits are remembered between restarts.
 
@@ -167,7 +168,6 @@ The sidebar comes in three layers, most vital first:
 - **Chat details:** how many hours of history to keep (or forever), which kinds of spacer lines
   to leave out (buying and selling, party quests and parties, everything else; left-out lines
   are kept, so unticking brings them back), and when the right-click menu closes
-- **Own guild setup** (below)
 
 ## Twitch chat (opt-in)
 
@@ -188,8 +188,7 @@ apps share it with each other.
 **Setting up (once, by the server's admins):** *Settings → Guild ↔ Discord → Add the bot to
 your server* (choose **Add to Server**), then type `/bind` in the channel for guild
 chat. The bot makes the **guild code** (`ABCD-EFGH-JKLM`) and posts and pins it there. Only admins
-can `/bind` and `/unbind`. Guilds that would rather not use the shared bot can use *Own guild
-setup* (Advanced) with a webhook and, optionally, their own bot.
+can `/bind` and `/unbind`.
 
 **Joining:** the pinned post or `/guildcode` in the guild's Discord, then *Settings → Guild ↔
 Discord*: enter the code and **Join**: your guild chat now goes to the guild's Discord. Tick
@@ -207,8 +206,7 @@ same on every screen). After a few seconds every app has heard everyone's readin
 matches them up the same way (same minute, same speaker, nearly the same text) and agrees on the
 best wording (text recognition's slips, like "rn" for "m", lose) and on who posts it: the member
 with the lowest id among those who read it. That one app posts it; the others stay quiet. More
-members sharing means fewer gaps, never more copies. The bot (or, in an own setup, the admin's
-app) keeps the guild's details on the channel for new members and reads the Discord channel for
+members sharing means fewer gaps, never more copies. The bot keeps the guild's details on the channel for new members and reads the Discord channel for
 everyone's Guild tab.
 
 **What is sent:** guild chat only, with the speaker's name and the game's time stamp. Never

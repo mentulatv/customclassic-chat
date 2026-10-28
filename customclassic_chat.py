@@ -92,6 +92,7 @@ DEFAULTS = {
     "unlocked": False,        # placed anywhere you like instead of on the game's chat (it still reads the game's chat)
     "free": None,             # where it sits then, on screen: left, top, width, height
     "windows": [],            # extra chat windows: each its tab, place ("free") and see-through
+    "normal_windows": [],     # chats in regular windows (title bar, minimise, close): each its tab and place
 }
 MEGAPHONES = {"megaphone", "super_megaphone", "item_megaphone"}
 TABS = [("All", {"map", "whisper", "party", "buddy", "guild", "other", "system", "status"}),
@@ -1462,7 +1463,7 @@ class ChatView:
         (name, x0, x1): ◐, + to split the chat (while it isn't), and the ⚠ when there is one."""
         s = self.strip.height - 4
         x = self.strip.width - s - 4 - (self.corner_px() + 4 if self.can_resize() else 0)
-        names = ["see"] + (["split"] if self.can_split() else []) + (["warn"] if self.warning() else [])
+        names = ["see"] + (["warn"] if self.warning() else [])
         out = []
         for name in names:
             out.append((name, x, x + s))
@@ -1482,7 +1483,7 @@ class ChatView:
             m.add_command(label="Split this window (a pane on top)", command=lambda: app.add_split(self))
         else:
             m.add_command(label="Remove the split", command=split.close)
-        m.add_command(label="New chat window", command=app.add_window)
+        m.add_cascade(label="New chat window", menu=app.new_window_menu(m))
         m.add_separator()
         m.add_command(label=("✓ " if self.see_through else "") + "See-through", command=lambda: (
             self.toggle_see_through(), self.render()))
@@ -1958,6 +1959,98 @@ class ExtraChat(ChatView):
         self.msgs.root.destroy()
 
 
+class NormalChat:
+    """A chat in a regular window, with a title bar (minimise, maximise, close), to keep beside
+    the game rather than on it: its own tab, size and place, remembered between restarts."""
+
+    MAX_SHOWN = 500  # the newest messages it shows
+
+    def __init__(self, app, conf: dict):
+        import tkinter as tk
+        self.app, self.conf = app, conf
+        self.log = app.log.view_of(conf.get("tab") or "All")
+        top = self.top = tk.Toplevel(app.root)
+        top.title("CustomClassic Chat")
+        top.configure(bg=PANEL)
+        try:
+            top.iconbitmap(str(app.icon_path()))
+        except Exception:
+            pass
+        top.geometry(conf.get("geometry") or "560x340+120+120")
+        top.minsize(260, 140)
+        top.protocol("WM_DELETE_WINDOW", lambda: app.close_normal(self))
+        top.bind("<Configure>", self.moved)
+        self.bar = tk.Frame(top, bg=STRIP)
+        self.bar.pack(fill="x")
+        body = tk.Frame(top, bg=PANEL)
+        body.pack(fill="both", expand=True)
+        scroll = tk.Scrollbar(body)
+        scroll.pack(side="right", fill="y")
+        self.text = tk.Text(body, bg=self.app.opts["panel_bg"] or PANEL, fg=INK, wrap="word", relief="flat",
+                            padx=8, pady=6, cursor="arrow", yscrollcommand=scroll.set, highlightthickness=0)
+        self.text.pack(side="left", fill="both", expand=True)
+        scroll.configure(command=self.text.yview)
+        for w in (self.text, self.bar):
+            w.bind("<Button-3>", self.menu)
+        self.drawn = None
+        self.render()
+
+    def moved(self, e=None) -> None:
+        if e is not None and e.widget is not self.top or self.top.state() != "normal":
+            return
+        geometry = self.top.geometry()
+        if geometry != self.conf.get("geometry"):
+            self.conf["geometry"] = geometry
+            save_settings(self.app.opts)
+
+    def pick(self, name: str) -> None:
+        self.log.select(name)
+        self.conf["tab"] = name
+        save_settings(self.app.opts)
+        self.render()
+
+    def render(self) -> None:
+        import tkinter as tk
+        app = self.app
+        tabs = [name for name, _ in self.log.tabs]
+        if self.drawn != (tuple(tabs), self.log.tab):  # the tab row, when it changed
+            for child in self.bar.winfo_children():
+                child.destroy()
+            for name in tabs:
+                on = name == self.log.tab
+                tk.Button(self.bar, text=name, relief="flat", bd=0, padx=10, pady=3, cursor="hand2",
+                          bg=TAB_ON if on else TAB, fg=INK if on else SOFT, activebackground=TAB_ON,
+                          activeforeground=INK, font=app.tab_font,
+                          command=lambda n=name: self.pick(n)).pack(side="left", padx=(0, 2), pady=2)
+            self.drawn = (tuple(tabs), self.log.tab)
+        t = self.text
+        at_end = t.yview()[1] >= 0.999
+        t.configure(state="normal", font=app.font, bg=app.opts["panel_bg"] or PANEL)
+        t.delete("1.0", "end")
+        for m in self.log.visible()[-self.MAX_SHOWN:]:
+            fg = app.opts["colors"].get(m["kind"]) or m.get("fg") or COLORS[m["kind"]]
+            tag = f"{fg}|{m.get('bg') or ''}"
+            t.tag_configure(tag, foreground=fg, background=m.get("bg") or "")
+            star = "★ " if m.get("watch") and self.log.tab != "Watch" else ""
+            t.insert("end", star + line_text(m, app.opts["timestamps"]) + "\n", tag)
+        t.configure(state="disabled")
+        if at_end:
+            t.see("end")
+
+    def menu(self, e) -> None:
+        import tkinter as tk
+        app = self.app
+        m = tk.Menu(self.top, tearoff=0, bg=PANEL, fg=INK, activebackground=TAB_ON, activeforeground=INK)
+        m.add_cascade(label="New chat window", menu=app.new_window_menu(m))
+        m.add_command(label="Settings…", command=app.open_settings)
+        m.add_separator()
+        m.add_command(label="Close this window", command=lambda: app.close_normal(self))
+        try:
+            m.tk_popup(e.x_root + 2, e.y_root + 2)
+        finally:
+            m.grab_release()
+
+
 class ChatPanel(ChatView):
     def __init__(self, opts: dict, demo: bool = False, always_show: bool = False, verbose: bool = False):
         import overlay
@@ -1993,6 +2086,7 @@ class ChatPanel(ChatView):
         if not isinstance(opts.get("windows"), list):
             opts["windows"] = []
         self.windows = [ExtraChat(self, conf) for conf in opts["windows"]]
+        self.normal = [NormalChat(self, conf) for conf in opts["normal_windows"]]
         CACHE_DIR.mkdir(exist_ok=True)
         self.chime = CACHE_DIR / f"whisper_{int(opts['volume'] * 100)}.wav"
         if not self.chime.exists():
@@ -2253,7 +2347,7 @@ class ChatPanel(ChatView):
                 if name in v.log.unread:
                     v.log.unread[name] = False
         ChatView.render(self)
-        for w in self.windows:
+        for w in [*self.windows, *self.normal]:
             w.log.hidden, w.log.hide_padded = self.log.hidden, self.log.hide_padded
             w.render()
 
@@ -2263,6 +2357,28 @@ class ChatPanel(ChatView):
             ChatView.apply_see_through(w)
 
     # extra chat windows -------------------------------------------------------
+
+    def new_window_menu(self, parent):
+        """New chat window: a regular window (the easy one, beside the game), or an overlay on it."""
+        import tkinter as tk
+        sub = tk.Menu(parent, tearoff=0, bg=PANEL, fg=INK, activebackground=TAB_ON, activeforeground=INK)
+        sub.add_command(label="Normal window (beside the game)", command=self.add_normal_window)
+        sub.add_command(label="Overlay on the game", command=self.add_window)
+        return sub
+
+    def add_normal_window(self) -> None:
+        conf = {"tab": "All"}
+        self.opts["normal_windows"].append(conf)
+        self.normal.append(NormalChat(self, conf))
+        save_settings(self.opts)
+        self.settings_changed()
+
+    def close_normal(self, w: "NormalChat") -> None:
+        self.normal.remove(w)
+        self.opts["normal_windows"] = [c for c in self.opts["normal_windows"] if c is not w.conf]
+        w.top.destroy()
+        save_settings(self.opts)
+        self.settings_changed()
 
     def add_window(self) -> None:
         """A new chat window showing All, just above the panel, in adjust mode to be dragged where
@@ -2415,6 +2531,8 @@ class ChatPanel(ChatView):
                     self.log.add(data)
                     for w in self.windows:
                         w.log.notice(data)
+                    for w in self.normal:
+                        w.log.notice(data)
                     if not self.demo:
                         save_message(HISTORY_FILE, data)
                     for v in [self, *self.windows]:  # reading history: keep the same lines in view
@@ -2438,8 +2556,8 @@ class ChatPanel(ChatView):
                 elif kind == "unlock":
                     self.set_unlocked(not self.opts["unlocked"])
                     changed = True
-                elif kind == "window":
-                    self.add_window()
+                elif kind == "window":  # the tray: a normal window, the easy kind
+                    self.add_normal_window()
                     changed = True
                 elif kind == "split":
                     self.add_split()
@@ -2639,7 +2757,7 @@ class ChatPanel(ChatView):
         old, new = rename
         self.log.set_tabs(self.tabs(), new if old and self.log.tab == old else None)
         self.opts["tab"] = self.log.tab
-        for w in self.windows:
+        for w in [*self.windows, *self.normal]:
             w.log.set_tabs(self.tabs(), new if old and w.log.tab == old else None)
             w.conf["tab"] = w.log.tab
 

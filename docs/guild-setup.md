@@ -90,31 +90,13 @@ PC.
 
 ---
 
-## Own setup (advanced, without the shared bot)
-
-If your guild would rather not use the shared bot: *Settings → Own guild setup* (under
-Advanced).
-
-1. **A webhook:** in the guild chat channel, *Edit Channel → Integrations → Webhooks → New Webhook
-   → Copy Webhook URL*, and paste it.
-2. **Your own bot (optional),** for Discord messages in the Guild tab and `!guildcode`:
-   discord.com/developers → *New Application → Bot*. Copy its token and switch on **Message
-   Content Intent**. The app shows the link that adds it to your server. The token stays on your
-   PC.
-3. **The guild's name.** Press **Create**: members join with the guild code it makes.
-
-How to join is posted in the channel. With your own bot, Discord messages reach the members only
-while your app is running. Discord identities (`/chatlink`) come from the shared bot only.
-
----
-
 ## If something's off
 
 | What you see | What to do |
 | --- | --- |
 | `/bind` doesn't show up | Make sure the bot is in the server's member list; if not, add it again with **Add to Server**. Commands can take a minute to appear after adding. |
 | *"Waiting for the guild's details…"* | The code is right, but no details have come yet. Give it a minute; check the code with `/guildcode`. |
-| Nothing from Discord in the Guild tab | The bot can't see the channel (common with private channels): *Edit Channel → Permissions*, add **CustomClassic Chat**, allow **View Channel**, **Send Messages** and **Read Message History**. In an own setup without a bot, Discord messages don't come through at all. |
+| Nothing from Discord in the Guild tab | The bot can't see the channel (common with private channels): *Edit Channel → Permissions*, add **CustomClassic Chat**, allow **View Channel**, **Send Messages** and **Read Message History**. |
 | Names show *(unverified)* | That message's Discord identity didn't check out (made up, or from another Discord server). |
 | *"port 47321 is taken"* | Another program uses the port the login link needs. Close it and start CustomClassic Chat again. |
 | The login link page says it isn't a working login | It ran out or was already replaced: `/chatlink` again. |

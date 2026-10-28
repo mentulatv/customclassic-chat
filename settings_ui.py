@@ -21,13 +21,12 @@ UI = "Segoe UI"
 # the sidebar, most vital first: what everyone sets, features to turn on, and finer choices
 SECTIONS = [("Basics", ["Appearance", "Position", "Chat", "Watch list"]),
             ("Extras", ["Tabs & windows", "Twitch", "Guild ↔ Discord"]),
-            ("Advanced", ["Look", "Chat details", "Own guild setup"])]
+            ("Advanced", ["Look", "Chat details"])]
 PAGES = [name for _, names in SECTIONS for name in names]
 RENAMED = {"Tabs": "Tabs & windows", "Guild": "Guild ↔ Discord", "Discord": "Guild ↔ Discord",
            "Guild setup": "Guild ↔ Discord",
-           "Own setup": "Own guild setup", "Advanced": "Look"}
+           "Own setup": "Guild ↔ Discord", "Own guild setup": "Guild ↔ Discord", "Advanced": "Look"}
 GUIDE = "https://github.com/mentulatv/customclassic-chat/blob/main/docs/guild-setup.md"
-OWN_SETUP_GUIDE = GUIDE + "#own-setup-advanced-without-the-shared-bot"
 
 
 # ------------------------------------------------------------------ widgets in one style
@@ -152,7 +151,7 @@ class SettingsWindow:
         builders = {"Appearance": self.appearance, "Position": self.position, "Chat": self.chat,
                     "Watch list": self.watch_list, "Tabs & windows": self.tabs, "Twitch": self.twitch,
                     "Guild ↔ Discord": self.discord, "Look": self.look,
-                    "Chat details": self.chat_details, "Own guild setup": self.own_setup}
+                    "Chat details": self.chat_details}
         for name, build in builders.items():
             page = tk.Frame(self.content, bg=BG)
             label(page, name, size=15, bold=True, bg=BG).pack(fill="x", pady=(0, 14))
@@ -327,15 +326,17 @@ class SettingsWindow:
             note.configure(text="Not split." if not n else f"Split into {n + 1} panes.")
         show_splits()
 
-        c = card(page, "Extra chat windows", "More windows anywhere on screen, each with its own tab; right-click one to close it.")
+        c = card(page, "Extra chat windows", "A normal window to keep beside the game, or an overlay on it; each "
+                                             "has its own tab. Right-click one for more.")
         row = tk.Frame(c, bg=CARD)
         row.pack(fill="x")
-        button(row, "Add a chat window", app.add_window, primary=True).pack(side="left")
+        button(row, "Add a chat window", app.add_normal_window, primary=True).pack(side="left")
+        button(row, "Add an overlay", app.add_window).pack(side="left", padx=(8, 0))
         count = label(row, "", soft=True, size=9)
         count.pack(side="left", padx=(12, 0))
 
         def show_count():
-            n = sum(1 for w in app.windows if not w.docked)
+            n = sum(1 for w in app.windows if not w.docked) + len(app.normal)
             count.configure(text="No extra windows yet." if not n else f"{n} extra window{'s' if n != 1 else ''} open.")
         app.settings_vars["windows"] = lambda: count.winfo_exists() and (show_count(), show_splits())
         show_count()
@@ -476,129 +477,6 @@ class SettingsWindow:
             button(row, "Add the bot to your server", lambda: __import__("webbrowser").open(invite),
                    primary=True).pack(side="left")
         button(row, "Guide", lambda: __import__("webbrowser").open(GUIDE)).pack(side="left", padx=(8, 0))
-        button(row, "Without the shared bot…", lambda: __import__("webbrowser").open(OWN_SETUP_GUIDE)).pack(
-            side="left", padx=(8, 0))
-
-    def own_setup(self, page) -> None:
-        """A guild run from this PC: a webhook, optionally its own bot, and how members join."""
-        app, opts, top = self.app, self.opts, self.top
-        hook, bot, gname = tk.StringVar(), tk.StringVar(), tk.StringVar()
-        c = card(page, "1. A webhook for the channel", "In the Discord channel for guild chat: Edit Channel → "
-                                                       "Integrations → Webhooks → New Webhook → Copy Webhook URL.")
-        f = entry(c, hook, 52)
-        f.configure(show="•")  # a secret: anyone holding it can post in the channel
-        f.pack(anchor="w", ipady=2)
-        c = card(page, "2. Your own bot (optional)", "For the Guild tab and !guildcode without the shared bot: "
-                                                     "discord.com/developers → New Application → Bot, copy its token, "
-                                                     "switch on Message Content Intent. It stays on this PC.")
-        row = tk.Frame(c, bg=CARD)
-        row.pack(fill="x")
-        f = entry(row, bot, 34)
-        f.configure(show="•")
-        f.pack(side="left", ipady=2)
-        invite = button(row, "Add the bot to your server", lambda: None)
-
-        def show_invite(*_):
-            link = guild_relay.bot_invite(bot.get())
-            if link:
-                invite.configure(command=lambda: __import__("webbrowser").open(link))
-                invite.pack(side="left", padx=(8, 0))
-            else:
-                invite.pack_forget()
-        bot.trace_add("write", show_invite)
-        current = guild_relay.guild_key(opts["relay_code"])
-        mine = opts["relay_admin"].get(current)
-        bot_note = label(c, "", soft=True, size=9, wrap=470)
-        if mine:  # a guild run from here: its bot can be added or changed without making a new guild
-            def bot_checked(out):
-                if isinstance(out, Exception):
-                    bot_note.configure(text=str(out), fg=WARN)
-                    return
-                opts["relay_admin"][current] = {**mine, "bot": bot.get().strip()}
-                app.set_opt("relay_admin", opts["relay_admin"])
-                app.start_relay()
-                bot.set("")
-                bot_note.configure(text=f"{out} now reads the channel for {mine.get('name', 'the guild')}'s Discord "
-                                        "tab, and answers !guildcode, while this app runs.", fg=INK)
-
-            def use_bot():
-                if not bot.get().strip():
-                    bot_note.configure(text="Paste the bot's token first.", fg=WARN)
-                    return
-                bot_note.configure(text="Checking the bot with Discord…", fg=SOFT)
-
-                def work():
-                    try:
-                        out = guild_relay.check_bot(bot.get(), mine.get("channel_id", ""))
-                    except Exception as e:  # shown as it is
-                        out = e
-                    top.after(0, lambda: top.winfo_exists() and bot_checked(out))
-                threading.Thread(target=work, daemon=True).start()
-            button(row, f"Use this bot for {mine.get('name', 'the guild')}", use_bot, primary=True).pack(
-                side="left", padx=(8, 0))
-            if mine.get("bot"):
-                bot_note.configure(text="This guild has a bot. Paste another token to change it.")
-        bot_note.pack(fill="x", pady=(4, 0))
-        c = card(page, "3. The guild", "")
-        row = tk.Frame(c, bg=CARD)
-        row.pack(fill="x")
-        label(row, "Guild name").pack(side="left")
-        entry(row, gname, 18).pack(side="left", padx=8, ipady=2)
-        label(c, "Members join with a guild code made for it.", soft=True, size=9, wrap=470).pack(fill="x",
-                                                                                                pady=(4, 0))
-        row = tk.Frame(page, bg=BG)
-        row.pack(fill="x")
-        made = label(page, "", soft=True, size=9, wrap=520, bg=BG)
-
-        def created(out):
-            if isinstance(out, Exception):
-                made.configure(text=str(out) or "Something went wrong; try again.", fg=WARN)
-                return
-            key = out.pop("code")
-            opts["relay_admin"] = {**opts["relay_admin"], key: out}
-            hook.set("")
-            bot.set("")
-            app.set_relay(key, opts["relay_tab"])
-            self.discord_code.set(guild_relay.key_label(key))  # the Guild page shows the new guild too
-            top.clipboard_clear()
-            top.clipboard_append(guild_relay.key_label(key))
-            made.configure(text=f"Done. Members join with {guild_relay.key_label(key)} (copied); how to join is posted "
-                                "in the channel. Keep this app running now and then: it keeps the guild's details "
-                                "on the channel for new members" + (", and reads Discord for the Guild tab." if
-                                                                     out.get("bot") else "."), fg=INK)
-
-        def create():
-            current = guild_relay.guild_key(opts["relay_code"])
-            if current in opts["relay_admin"] and not made.cget("text").startswith("You already"):
-                made.configure(text=f"You already run the guild {opts['relay_admin'][current].get('name', '')} "
-                                    f"({guild_relay.key_label(current)}). Press Create again to make another one "
-                                    "anyway; members of the old one stay on the old one.", fg=WARN)
-                return
-            if len(gname.get().strip()) < 2 or not hook.get().strip():
-                made.configure(text="Paste the webhook link and type the guild's name.", fg=WARN)
-                return
-            made.configure(text="Setting it up…", fg=SOFT)
-
-            def work():
-                try:
-                    out = guild_relay.create_guild(gname.get(), hook.get(), bot.get())
-                except Exception as e:  # shown as it is
-                    out = e
-                top.after(0, lambda: top.winfo_exists() and created(out))
-            threading.Thread(target=work, daemon=True).start()
-        button(row, "Create", create, primary=True).pack(side="left")
-
-        def close():
-            key = guild_relay.guild_key(opts["relay_code"])
-            if app.relay and key in opts["relay_admin"]:
-                app.relay.close_guild()
-                opts["relay_admin"] = {k: v for k, v in opts["relay_admin"].items() if k != key}
-                app.set_relay("", False)
-                self.discord_code.set("")
-                made.configure(text="Closed: members' apps stop sending to it.", fg=SOFT)
-        if guild_relay.guild_key(opts["relay_code"]) in opts["relay_admin"]:
-            button(row, "Close this guild", close).pack(side="left", padx=(8, 0))
-        made.pack(fill="x", pady=(8, 0))
 
     def look(self, page) -> None:
         """Finer choices for how the chat looks: font, weight, colours, how see-through ◐ makes it."""
