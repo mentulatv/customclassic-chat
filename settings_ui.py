@@ -18,7 +18,8 @@ BG, SIDE, CARD, FIELD = "#111827", "#0b1120", "#172033", "#0b1120"
 BORDER, ACCENT, ACCENT_HI = "#2a3654", "#3d6fd1", "#4f80e0"
 INK, SOFT, WARN = "#eef3fb", "#8f9db5", "#ffc24b"
 UI = "Segoe UI"
-PAGES = ["Appearance", "Position", "Chat", "Tabs", "Twitch", "Guild", "Guild setup", "Own setup", "Watch list"]
+PAGES = ["Appearance", "Position", "Chat", "Tabs", "Twitch", "Guild", "Guild setup", "Own setup", "Watch list",
+         "Advanced"]
 GUIDE = "https://github.com/mentulatv/customclassic-chat/blob/main/docs/guild-setup.md"
 
 
@@ -128,7 +129,8 @@ class SettingsWindow:
         self.content.pack_propagate(False)
         self.pages: dict[str, tk.Frame] = {}
         for name, build in zip(PAGES, (self.appearance, self.position, self.chat, self.tabs, self.twitch,
-                                       self.discord, self.guild_setup, self.own_setup, self.watch_list)):
+                                       self.discord, self.guild_setup, self.own_setup, self.watch_list,
+                                       self.advanced)):
             page = tk.Frame(self.content, bg=BG)
             label(page, name, size=15, bold=True, bg=BG).pack(fill="x", pady=(0, 14))
             build(page)
@@ -690,6 +692,28 @@ class SettingsWindow:
         if guild_relay.guild_key(opts["relay_code"]) in opts["relay_admin"]:
             button(row, "Close this guild", close).pack(side="left", padx=(8, 0))
         made.pack(fill="x", pady=(8, 0))
+
+    def advanced(self, page) -> None:
+        """Finer choices most people never need: the messages' font and weight."""
+        import customclassic_chat as mc
+        app, opts = self.app, self.opts
+        label(page, "Extra choices for how the chat looks. Everything here has a good default.", soft=True,
+              size=9, bg=BG).pack(fill="x", pady=(0, 8))
+        c = card(page, "Font", "The messages' font. Bold reads better over a busy game, above all with "
+                               "Keep the text solid (Appearance).")
+        family = tk.StringVar(value=opts["font_family"] if opts["font_family"] in dict(mc.FONTS) else mc.FONT)
+        bold = tk.BooleanVar(value=opts["font_bold"])
+
+        def use():
+            app.set_font(family.get(), bold.get())
+        grid = tk.Frame(c, bg=CARD)
+        grid.pack(fill="x")
+        for i, (name, kind) in enumerate(mc.FONTS):
+            r = radio(grid, name, family, name, use)
+            r.configure(font=(name, 10))  # each shown in itself
+            r.grid(row=i, column=0, sticky="w")
+            label(grid, kind, soft=True, size=9).grid(row=i, column=1, sticky="w", padx=(12, 0))
+        check(c, "Bold", bold, use).pack(fill="x", pady=(8, 0))
 
     def watch_list(self, page) -> None:
         app, opts = self.app, self.opts

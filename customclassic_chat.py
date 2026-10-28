@@ -48,6 +48,8 @@ CACHE_DIR = HERE / "cache"
 DEFAULTS = {
     "interval_s": 0.7,        # seconds between reads of the chat
     "font_px": None,          # message text size in pixels; None: sized from the game's chat lines
+    "font_family": "Verdana", # the messages' font, one of FONTS (Settings → Advanced)
+    "font_bold": False,       # the messages in bold
     "min_lines": 3,           # fewer lines in the game's chat (minimised, one or two): megaphones arriving together
                               # may scroll away unread, and a quiet ⚠ shows until clicked
     "history": 20000,         # messages kept in memory at most
@@ -129,6 +131,10 @@ GOLD = "#ffd24a"  # the watch list's star and dot
 ADJUST, ADJUST_EDGE = "#2f6fe0", "#9fc2ff"  # adjust mode: the banner, the outline and corner handles
 SB_TRACK, SB_BUTTON, SB_ARROW, SB_THUMB, SB_EDGE = "#e3e8ef", "#a9c8ee", "#1f4f8f", "#8ea3c2", "#5b7fb4"  # as the game's
 FONT = "Verdana"
+# the fonts on offer for the messages (Settings → Advanced): hand-picked, all in every Windows, as
+# (family, kind)
+FONTS = [("Verdana", "sans serif"), ("Segoe UI", "sans serif"), ("Tahoma", "sans serif"),
+         ("Georgia", "serif"), ("Times New Roman", "serif"), ("Consolas", "monospace"), ("Courier New", "monospace")]
 HOTKEYS = {1: 0x74, 2: 0x75, 3: 0x76, 4: 0x72}  # Ctrl+Alt+F5 adjust, F6 hide, F7 quit, F3 fit again
 RECHECK_S = 5  # seconds between looks at whether the game's chat was resized
 HK_EDIT, HK_HIDE, HK_QUIT, HK_FIT = 1, 2, 3, 4
@@ -1120,6 +1126,10 @@ class ChatView:
         self.back.canvas.bind("<MouseWheel>", self.on_wheel)
         self.back.canvas.bind("<Motion>", self.on_motion)
         self.back.canvas.bind("<ButtonRelease-3>", self.menu)
+        # a click brings the clicked window to the front: the backdrop goes straight back behind the text
+        for event in ("<ButtonPress>", "<ButtonRelease>"):
+            self.back.canvas.bind(event, lambda e: self.restack(), add="+")
+        self.msgs.behind.append(self.back)  # and whenever the text window is raised
         self.strip.canvas.bind("<ButtonPress-1>", self.on_strip_click)
         self.strip.canvas.bind("<B1-Motion>", self.on_grip_drag)
         self.strip.canvas.bind("<ButtonRelease-1>", self.on_grip_release)
@@ -1152,6 +1162,11 @@ class ChatView:
         self.msgs.show(visible or self.msgs.edit)
         self.strip.show(visible or self.msgs.edit)
         self.back.show(visible and self.solid())
+
+    def restack(self) -> None:
+        """The backdrop right behind the text window, now and once Windows has finished with a click."""
+        self.back.keep_on_top(again=False)
+        self.back.root.after(30, lambda: self.back.root.winfo_exists() and self.back.keep_on_top(again=False))
 
     def solid(self) -> bool:
         """Solid text: the text window in front, its background faded on the backdrop behind it
@@ -1901,7 +1916,9 @@ class ChatPanel(ChatView):
 
     def set_fonts(self) -> None:
         import tkinter.font as tkfont
-        self.font = tkfont.Font(family=FONT, size=-(self.opts["font_px"] or self.auto_px()))
+        family = self.opts["font_family"] if self.opts["font_family"] in dict(FONTS) else FONT
+        self.font = tkfont.Font(family=family, size=-(self.opts["font_px"] or self.auto_px()),
+                                weight="bold" if self.opts["font_bold"] else "normal")
         self.tab_font = tkfont.Font(family=FONT, size=-max(10, round(self.line * 0.5)))
         self.hint_font = tkfont.Font(family=FONT, size=-max(13, round(self.line * 0.85)), weight="bold")
 
@@ -2228,6 +2245,13 @@ class ChatPanel(ChatView):
 
     def set_text_size(self, px: int | None) -> None:
         self.opts["font_px"] = px
+        self.set_fonts()
+        self.render()
+        save_settings(self.opts)
+
+    def set_font(self, family: str, bold: bool) -> None:
+        """The messages' font and weight (Settings → Advanced)."""
+        self.opts["font_family"], self.opts["font_bold"] = family, bold
         self.set_fonts()
         self.render()
         save_settings(self.opts)
