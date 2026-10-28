@@ -1099,30 +1099,32 @@ def scrollbar_span(frame, x0: int, x1: int, seed_y: int, lo: int, hi: int) -> tu
     return (best[0] + lo, best[1] + lo) if best else None
 
 
+def mouse_state() -> tuple[int, int, bool]:
+    """Where the mouse pointer is on screen, and whether a button is held down (either one, so
+    left-handed mice count too)."""
+    import ctypes
+    import ctypes.wintypes as wt
+    u32 = ctypes.windll.user32
+    pt = wt.POINT()
+    u32.GetCursorPos(ctypes.byref(pt))
+    return pt.x, pt.y, bool(u32.GetAsyncKeyState(0x01) & 0x8000 or u32.GetAsyncKeyState(0x02) & 0x8000)
+
+
 def pointer_near(box: tuple[int, int, int, int]) -> bool:
     """The mouse pointer on or close to a box on screen (left, top, right, bottom). The game draws
     its own pointer, so it shows in pictures of the game: over the scrollbar it hides part of it
     (the hand reaches about 30 pixels right of and below its tip)."""
-    import ctypes
-    import ctypes.wintypes as wt
-    pt = wt.POINT()
-    if not ctypes.windll.user32.GetCursorPos(ctypes.byref(pt)):
-        return False
+    x, y, _ = mouse_state()
     left, top, right, bottom = box
-    return left - 34 <= pt.x <= right + 12 and top - 34 <= pt.y <= bottom + 12
+    return left - 34 <= x <= right + 12 and top - 34 <= y <= bottom + 12
 
 
 def dragging_on(box: tuple[int, int, int, int]) -> bool:
     """A mouse button held down with the pointer above a box's bottom and within its width: the
     game's chat being resized from its top edge, most likely (it's dragged up or down from there)."""
-    import ctypes
-    import ctypes.wintypes as wt
-    u32 = ctypes.windll.user32
-    if not (u32.GetAsyncKeyState(0x01) & 0x8000 or u32.GetAsyncKeyState(0x02) & 0x8000):
-        return False
-    pt = wt.POINT()
+    x, y, held = mouse_state()
     left, _, right, bottom = box
-    return bool(u32.GetCursorPos(ctypes.byref(pt))) and left <= pt.x <= right and pt.y <= bottom
+    return held and left <= x <= right and y <= bottom
 
 
 QUICK_S = 3  # after a drag on the game's chat, a new size seen in two pictures in a row is taken
@@ -2417,6 +2419,9 @@ class ChatPanel:
         self.covered = False       # the game is drawing something over its chat: step aside
         self.chat_closed = False   # the game's chat is closed completely: say so, and stay
         self.fit_asked = 0.0
+        self.edge_held = False     # the game chat's top edge grabbed, and still held: the main chat steps aside
+        self.back_at = 0.0         # let go: the main chat back once its new size is seen, or by then
+        self.was_held = False      # a mouse button down, last look
         self.explained = False     # the "chat too small" note, once a session
         self.settings = None
         self.settings_vars: dict = {}  # Settings window controls that change from elsewhere too
@@ -2461,6 +2466,8 @@ class ChatPanel:
             self.main.show(True)
         self.root.after(100, self.pump)
         self.root.after(300, self.follow)
+        if not demo:
+            self.root.after(40, self.watch_edge)
         self.apply_see_through()
         self.render()
 
@@ -2771,6 +2778,32 @@ class ChatPanel:
                 log_error(f"follow: {e.__class__.__name__}: {e}")
         self.root.after(300, self.follow)
 
+    def on_edge(self, x: int, y: int) -> bool:
+        """(x, y) on screen on the game chat's top edge (just above its lines and scrollbar, not on
+        the scrollbar's top arrow), above the main chat on it, within its width."""
+        r, game, main = self.read_rect, self.game, self.main
+        if not r or not game or self.opts["unlocked"] or not main.visible or main.rect is None:
+            return False
+        c = game["client"]
+        left, top = c["left"] + r["left"], c["top"] + r["top"]
+        return left - 4 <= x <= left + r["width"] + self.bar_px + 4 and top - 12 <= y < min(main.rect["top"], top + 4)
+
+    def watch_edge(self) -> None:
+        """The game chat's top edge grabbed (a mouse button pressed on it, above the main chat):
+        the main chat steps aside until it's let go, so the drag can go on down across it, and
+        comes back at the new size."""
+        try:
+            x, y, held = mouse_state()
+            if held and not self.was_held and self.on_edge(x, y):
+                self.edge_held = True
+                self.main.show(False)
+            elif not held and self.edge_held:
+                self.edge_held, self.back_at = False, time.time() + 1.2
+            self.was_held = held
+        except Exception as e:
+            log_error(f"edge: {e.__class__.__name__}: {e}")
+        self.root.after(40, self.watch_edge)
+
     def follow_once(self) -> None:
         unlocked, main = self.opts["unlocked"], self.main
         if unlocked and not main.edit and not main.busy():
@@ -2799,7 +2832,9 @@ class ChatPanel:
         # to step aside for; while typing in it, or with the game's chat closed, it stays
         up = bool(game) or self.always_show
         stays = unlocked or main.typing() or self.chat_closed
-        main.show(bool(up and (rect or unlocked)) and not self.user_hidden and not (self.covered and not stays))
+        aside = self.edge_held or time.time() < self.back_at  # the game chat being resized from its top edge
+        main.show(bool(up and (rect or unlocked)) and not self.user_hidden and not (self.covered and not stays)
+                  and not aside)
         for f in self.frames:
             f.show(up and not self.user_hidden)
 
@@ -2841,6 +2876,7 @@ class ChatPanel:
                             pass
                 elif kind == "fit":
                     self.opts["box"] = data
+                    self.back_at = 0.0  # stepped aside for a resize: its new size is here, back it comes
                     if data["line"] != self.line:
                         self.line = data["line"]
                         self.set_fonts()
