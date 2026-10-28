@@ -103,6 +103,15 @@ COLORS = {"guild": "#c8b4ff", "discord": "#8ea1f0", "guildsay": "#9fe3b8", "twit
 # the game's own pop-ups that appear over the chat box: CustomClassic Chat steps aside while one is up
 POPUP = re.compile(r"(?i)\b(?:party|guild|alliance|family)\s+invit\w*\s+from\b|\b(?:trade|friend|buddy)\s+request\s+from\b"
                    r"|\binvited\s+you\b")
+CHAT_TARGET = re.compile(r"(?i)(?:to\s+(?:the\s+)?)?(?:all|party|buddy|friends?|guild|alliance|whisper|spouse|expedition)")
+
+
+def chat_menu_open(read) -> bool:
+    """The game's chat-type list (All, Party, Buddy, Guild ...) is open over its chat: two or more of
+    its entries read where chat lines should be. Like a pop-up, the panel steps aside to show it."""
+    return sum(1 for ln in read if CHAT_TARGET.fullmatch(ln.text.strip(" .:"))) >= 2
+
+
 PANEL, STRIP, TAB, TAB_ON, INK, SOFT, DOT = "#111827", "#0b1120", "#1c2740", "#2f5597", "#eef3fb", "#8f9db5", "#ff4b4b"
 WARN = "#ffc24b"
 GOLD = "#ffd24a"  # the watch list's star and dot
@@ -1004,9 +1013,10 @@ def read_loop(app) -> None:
                             read = reader.read(img)
                             # the game drew something over its chat: a party invite or trade request
                             # (its words land among the lines read, before the scene is left out:
-                            # the pop-up isn't at the chat's left edge), or a window hiding most lines.
-                            # Lines read under a pop-up carry its words, so they wait until it's gone.
-                            popup = any(POPUP.search(ln.text) for ln in read)
+                            # the pop-up isn't at the chat's left edge), the chat-type list, or a window
+                            # hiding most lines. Lines read under a pop-up carry its words, so they wait
+                            # until it's gone.
+                            popup = any(POPUP.search(ln.text) for ln in read) or chat_menu_open(read)
                             lines = core.merge_wrapped(trim_scene(read, app.line), img.height, img.width)
                             if not popup:
                                 for msg in messages_from(lines, dedupe, t0, palette, app.opts["ignore_names"]):

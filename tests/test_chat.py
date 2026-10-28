@@ -175,6 +175,9 @@ def test_system_lines_and_popups():
     assert mc.POPUP.search(":00]BLOODSHED CHOS : [Blue Jewelry Boots] ch 8 good spaw Party invite from")
     assert mc.POPUP.search("Trade request from Bob1") and mc.POPUP.search("Kim has invited you to a guild")
     assert not mc.POPUP.search("[17:00] Bob1 : anyone want a party? invite me")
+    menu = [SimpleNamespace(text=t) for t in ("[17:00] Bob1 : hi", "All", "Party", "Buddy", "Guild")]
+    assert mc.chat_menu_open(menu)  # the chat-type list open over the chat
+    assert not mc.chat_menu_open([SimpleNamespace(text=t) for t in ("All", "[17:00] Bob1 : party", "Bob1 : guild?")])
 
 
 def test_steps_aside_when_the_game_covers_its_chat():
