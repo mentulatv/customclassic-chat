@@ -1063,6 +1063,7 @@ def read_loop(app) -> None:
     capture, hwnd, last_error = None, None, ""
     last_check, tops, watch, lost = time.time(), deque(maxlen=6), CoverWatch(), 0
     last_name, names = 0.0, deque(maxlen=3)  # the character's name: the same in the last reads wins
+    shorts = deque(maxlen=2)  # a short chat's line count, as counted in the last looks
     while not app.stop.is_set():
         t0 = time.time()
         try:
@@ -1134,9 +1135,14 @@ def read_loop(app) -> None:
                         if not found and not closed and img:  # one or two lines: find_lines can't tell
                             n = short_chat(reader.read(img), r["top"] + r["height"] - y0, r["left"] - x0,
                                            r["left"] - x0 + r["width"] * 0.6, line)
-                            if n:  # that many lines, up from its bottom
+                            # only a chat too short for find_lines, and the same count twice in a row:
+                            # one odd read (a band, a wrap) mustn't shrink the panel
+                            shorts.append(n if 0 < n < 3 else 0)
+                            if n and shorts.count(n) == 2:  # that many lines, up from its bottom
                                 found = ({"left": r["left"] - x0, "top": r["top"] + r["height"] - y0 - n * line,
                                           "width": r["width"], "height": n * line}, app.line)
+                        elif found:
+                            shorts.clear()
                         lost = 0 if found or closed else lost + 1
                         if found and abs(found[1] - app.line) > app.line * 0.2:
                             app.want_fit = True  # the game's UI Size changed: the lines are another size, fit afresh
@@ -1407,8 +1413,15 @@ class ChatView:
                  "warn": self.dismiss_warning}[name]()
                 self.render()
                 return
+        # anywhere else on the tab row: dragged up or down it resizes from the top (taller or
+        # shorter, the bottom stays); let go without dragging and it was a click on a tab
+        self.bar_press = (e.x, e.x_root, e.y_root)
+
+    BAR_SLOP = 4  # pixels the pointer moves up or down before a press on the tab row is a resize
+
+    def pick_tab(self, x: int) -> None:
         for name, x0, x1 in self.tab_spans():
-            if x0 <= e.x < x1:
+            if x0 <= x < x1:
                 self.log.select(name)
                 self.scroll = 0
                 self.tab_chosen(name)
@@ -1496,10 +1509,15 @@ class ChatView:
         if self.drag:
             self.edit_drag(e)
             return
+        press = getattr(self, "bar_press", None)
+        if press and not self.grip:  # the tab row, dragged: from now on a resize from the top
+            if abs(e.y_root - press[2]) < self.BAR_SLOP or getattr(self, "docked", False):
+                return
+            self.grip = (press[1], press[2], self.opts["extra"], self.placed())
         if self.grip and self.is_free:  # wider to the right, taller upward: the bottom-left corner stays
             x0, y0, _, p = self.grip
             bottom = p["top"] + p["height"]
-            w = max(200, p["width"] + (e.x_root - x0))
+            w = p["width"] if press else max(200, p["width"] + (e.x_root - x0))  # (the tab row: height only)
             h = max(2 * round(self.line) + strip_height(self.line), p["height"] + (y0 - e.y_root))
             self.place({**p, "top": bottom - h, "height": h, "width": w})
         elif self.grip:  # on the game's chat its width is the chat's: only taller, like the game's
@@ -1510,6 +1528,10 @@ class ChatView:
         if getattr(self, "menu_on_release", False):
             self.menu_on_release = False
             self.menu(e)
+            return
+        press, self.bar_press = getattr(self, "bar_press", None), None
+        if press and not self.grip:  # a click on the tab row, not a drag
+            self.pick_tab(press[0])
             return
         if self.grip:
             self.grip = None
@@ -2196,7 +2218,13 @@ class ChatPanel(ChatView):
             top_room = c["top"] + self.read_rect["top"]  # up to the top of the screen
             self.opts["extra"] = max(0, min(top_room, extra0 + (y0 - e.y_root)))
             read = {**self.read_rect, "left": c["left"] + self.read_rect["left"], "top": c["top"] + self.read_rect["top"]}
-            self.place(panel_rect(read, self.opts["extra"], self.bar_px))
+            self.place(self.on_chat(self.reach(anchored(read, self.line, self.bar_px))))
+
+    def reach(self, full: dict) -> dict:
+        """Higher than the game's chat by what its top bar was dragged up (0: just under the
+        chat's top edge, which then stays free for resizing the game's chat itself)."""
+        extra = max(0, int(self.opts["extra"]))
+        return {**full, "top": full["top"] - extra, "height": full["height"] + extra}
 
     def on_chat(self, full: dict) -> dict:
         """The panel on the game's chat, with its split (if any) taking the top of that room."""
@@ -2331,7 +2359,7 @@ class ChatPanel(ChatView):
                                   "top": rect["top"] - game["client"]["top"], "width": rect["width"],
                                   "height": rect["height"]}
                 if not unlocked:
-                    full = anchored(rect, self.line, self.bar_px)
+                    full = self.reach(anchored(rect, self.line, self.bar_px))
                     if self.chat_closed and self.warning():  # one line right above the typing bar: what's wrong
                         h = strip_height(self.line) + round(self.line * 1.6)
                         full = {**full, "top": full["top"] + full["height"] - h, "height": h}

@@ -89,7 +89,7 @@ python.exe to PATH"), download this repository, double-click **`setup.bat`** onc
 | | |
 |---|---|
 | **≡** (left end) | Opens the menu (the same as right-clicking the chat). |
-| Tabs | Click to switch. A red dot means unread messages; a gold dot on Watch means your watch list caught something. |
+| Tabs | Click to switch. A red dot means unread messages; a gold dot on Watch means your watch list caught something. **Drag the tab row up or down** to make the chat taller or shorter from the top (the bottom stays). On the game's chat box, dragged all the way down it sits just under the game chat's top edge, so you can drag that edge to resize the game's chat itself: this chat follows. |
 | **◐** (right end) | See-through: messages 90% see-through and click-through until clicked again. |
 | **+** (next to ◐) | Split this window: a pane on top of it with its own tabs (shown while it isn't split). |
 | **Corner grip** (right end) | Drag to resize: wider to the right, taller upward; the bottom-left corner stays. On extra windows and an unlocked panel: the chat on the game's chat box stays put. |
