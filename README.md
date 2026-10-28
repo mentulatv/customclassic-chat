@@ -20,7 +20,8 @@ chat stay readable; megaphones get their own tab instead of flooding everything 
 - **Looks like the game:** megaphones on their pink, teal or gold band, green whispers,
   orange buddy chat, white map chat. Text size, colours, opacity and time stamps are adjustable.
 - **Fits the game's chat box by itself** at any resolution or Windows scaling, follows the
-  window when it moves or resizes, and follows the chat when you make it taller. It never
+  window when it moves or resizes, and follows the chat at once when you make it taller or
+  shorter (it watches the game's own scrollbar a few times a second). It never
   covers the typing bar or the chat-target button, and it steps aside when the game shows
   a party invite or trade request over the chat. It stays up while the game is open, even
   behind other windows, and hides while the game is minimised.
@@ -90,7 +91,7 @@ python.exe to PATH"), download this repository, double-click **`setup.bat`** onc
 |---|---|
 | **≡** (left end) | Opens the menu (the same as right-clicking the chat). |
 | Tabs | Click to switch. A red dot means unread messages; a gold dot on Watch means your watch list caught something. **Drag the tab row up or down** to make the chat taller or shorter from the top (the bottom stays). On the game's chat box, dragged all the way down it sits just under the game chat's top edge, so you can drag that edge to resize the game's chat itself: this chat follows. |
-| **◐** (right end) | See-through: messages 90% see-through and click-through until clicked again. |
+| **◐** (right end) | See-through: the window 90% see-through and clicks going to the game underneath; a small ◐ stays clickable to turn it off again. |
 | **Corner grip** (right end) | Drag to resize: wider to the right, taller upward; the bottom-left corner stays. On extra windows and an unlocked panel: the chat on the game's chat box stays put. |
 | **⚠** (amber) | When the game's chat shows fewer than 3 lines (a long megaphone takes two; 4 or more is best) or is closed: an amber line says so across the top of every chat window, since megaphones arriving together could scroll away unread. With the game's chat closed, the chat on it shrinks to just that line. Make the game's chat taller (drag its top edge: the chat on it follows), or click the warning to put it away. |
 
@@ -254,7 +255,14 @@ apart: megaphones sit on a coloured band, whispers are green, and so on.
 
 The chat box is measured in pixels: the line spacing from the text rows, the right edge where
 the megaphone bands meet the game's scrollbar, and the bottom from the frame line above the
-typing bar. That's why it fits at any resolution or scaling.
+typing bar. That's why it fits at any resolution or scaling. After that, its size is followed
+from the game's scrollbar alone (its edge is one unbroken run of grey from arrow to arrow),
+a few times a second and in a few milliseconds a look, so resizing the game's chat is
+followed at once.
+
+Each overlay chat is one window (with a backdrop behind it, so the text can stay solid while
+the background fades) holding its panes: splitting adds a pane inside it, and moving or
+resizing takes the whole window.
 
 The game window is found by its title ("MapleStory"). Only window titles and positions are
 asked for; the game's process is never opened.

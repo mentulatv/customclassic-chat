@@ -399,15 +399,35 @@ def test_the_right_click_menu_closes_once_the_pointer_is_well_away():
 
 
 def test_moving_a_window_keeps_its_size():
-    placed = []
-    view = SimpleNamespace(drag=("move", 100, 100, {"left": 500, "top": 300, "width": 400, "height": 200}), line=15,
-                           place=placed.append)
-    view.sizer = lambda: view
-    mc.ChatView.edit_drag(view, SimpleNamespace(x_root=40, y_root=120))  # dragged 60 px left, 20 down
-    assert placed == [{"left": 440, "top": 320, "width": 400, "height": 200}]
-    view.drag = ("e", 100, 100, {"left": 500, "top": 300, "width": 400, "height": 200})
-    mc.ChatView.edit_drag(view, SimpleNamespace(x_root=160, y_root=100))  # the right edge, 60 px right
-    assert placed[-1] == {"left": 500, "top": 300, "width": 460, "height": 200}
+    r = {"left": 500, "top": 300, "width": 400, "height": 200}
+    assert mc.dragged_rect("move", r, -60, 20, 200, 60) == {"left": 440, "top": 320, "width": 400, "height": 200}
+    assert mc.dragged_rect("e", r, 60, 0, 200, 60) == {"left": 500, "top": 300, "width": 460, "height": 200}
+    assert mc.dragged_rect("nw", r, 30, -40, 200, 60) == {"left": 530, "top": 260, "width": 370, "height": 240}
+    assert mc.dragged_rect("w", r, 300, 0, 200, 60)["width"] == 200  # never narrower than that
+
+
+def test_old_splits_become_panes_in_their_frames():
+    opts = {"windows": [{"tab": "All", "id": "w1", "free": {"left": 1}},
+                        {"dock": "above", "tab": "Mega", "height": 90},
+                        {"dock": "above", "tab": "Party", "host": "w1", "share": 0.3},
+                        {"dock": "above", "tab": "Whisper", "host": "w1", "share": 0.2}]}
+    mc.migrate_windows(opts)
+    assert opts["windows"] == [{"tab": "All", "id": "w1", "free": {"left": 1},
+                                "panes": [{"tab": "Whisper", "share": 0.2}, {"tab": "Party", "share": 0.3}]}]
+    assert opts["main_panes"] == [{"tab": "Mega", "height": 90}]
+
+
+def test_the_game_scrollbar_is_found_from_its_pixels():
+    import numpy as np
+    frame = np.zeros((200, 40, 4), np.uint8)
+    frame[:, :, :3] = (20, 50, 90)  # the scene (BGR)
+    frame[41:150, 10, :3] = 221     # the scrollbar's edge, top arrow to bottom one
+    frame[44:52, 13:20, :3] = (153, 102, 34)    # the blue arrow buttons beside it, top and bottom
+    frame[139:147, 13:20, :3] = (153, 102, 34)
+    assert mc.scrollbar_span(frame, 6, 16, 140, 0, 200) == (41, 149)
+    frame[60:80, 9:22, :3] = (40, 120, 200)  # a window over its upper part: no top arrow beside the run any more
+    assert mc.scrollbar_span(frame, 6, 16, 140, 0, 200) is None
+
 
 
 def test_guild_chat_switches_on_with_its_colour_alone():

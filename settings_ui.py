@@ -7,7 +7,6 @@ how it looks, where it sits, what the chat shows, the tabs, Twitch and the watch
 
 from __future__ import annotations
 
-import threading
 import tkinter as tk
 
 import guild_relay
@@ -178,7 +177,7 @@ class SettingsWindow:
         top.update_idletasks()
         sw, sh = top.winfo_screenwidth(), top.winfo_screenheight()
         x = max(0, min(app.root.winfo_x() + 20, sw - top.winfo_width() - 10))
-        y = max(0, min(app.strip.root.winfo_y() - top.winfo_height() - 20, sh - top.winfo_height() - 60))
+        y = max(0, min(app.main.placed()["top"] - top.winfo_height() - 20, sh - top.winfo_height() - 60))
         top.geometry(f"+{x}+{y}")
 
     # pages ------------------------------------------------------------------
@@ -317,12 +316,12 @@ class SettingsWindow:
         c = card(page, "Split the chat", "A second pane on top with its own tabs, say Mega above and All below.")
         row = tk.Frame(c, bg=CARD)
         row.pack(fill="x")
-        button(row, "Split the chat", app.add_split, primary=True).pack(side="left")
+        button(row, "Split the chat", lambda: app.add_split(), primary=True).pack(side="left")
         note = label(row, "", soft=True, size=9)
         note.pack(side="left", padx=(12, 0))
 
         def show_splits():
-            n = sum(1 for w in app.windows if w.docked)
+            n = len(app.main.panes) - 1
             note.configure(text="Not split." if not n else f"Split into {n + 1} panes.")
         show_splits()
 
@@ -336,7 +335,7 @@ class SettingsWindow:
         count.pack(side="left", padx=(12, 0))
 
         def show_count():
-            n = sum(1 for w in app.windows if not w.docked) + len(app.normal)
+            n = len(app.frames) + len(app.normal)
             count.configure(text="No extra windows yet." if not n else f"{n} extra window{'s' if n != 1 else ''} open.")
         app.settings_vars["windows"] = lambda: count.winfo_exists() and (show_count(), show_splits())
         show_count()

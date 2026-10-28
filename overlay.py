@@ -20,7 +20,7 @@ GWL_EXSTYLE = -20
 WS_EX_LAYERED, WS_EX_TRANSPARENT, WS_EX_TOOLWINDOW = 0x00080000, 0x00000020, 0x00000080
 WS_EX_NOACTIVATE, WS_EX_TOPMOST = 0x08000000, 0x00000008
 HWND_TOPMOST = -1
-SWP_NOSIZE, SWP_NOMOVE, SWP_NOACTIVATE = 0x0001, 0x0002, 0x0010
+SWP_NOSIZE, SWP_NOMOVE, SWP_NOZORDER, SWP_NOACTIVATE = 0x0001, 0x0002, 0x0004, 0x0010
 MOD_ALT, MOD_CONTROL, MOD_NOREPEAT = 0x0001, 0x0002, 0x4000
 WM_HOTKEY = 0x0312
 if user32:
@@ -104,12 +104,17 @@ class Overlay:
         self.root.after(2000, self.keep_on_top)
 
     def place(self, x: float, y: float, width: float, height: float) -> None:
-        x, y, width, height = (int(round(v)) for v in (x, y, width, height))  # Tk takes whole pixels only
-        r = wintypes.RECT()  # where Windows really has it (Tk's own idea can lag behind a new window)
+        """Put it there, unless it's there already: checked against where Windows really has it (a
+        new window can be somewhere else than Tk thinks), and told to Windows straight away too (Tk
+        alone can put a new window back at its first place when it first shows it)."""
+        x, y, width, height = (int(round(v)) for v in (x, y, width, height))  # whole pixels only
+        r = wintypes.RECT()
         user32.GetWindowRect(self.hwnd, ctypes.byref(r))
-        if (x, y, width, height) != (r.left, r.top, r.right - r.left, r.bottom - r.top) or                 (width, height) != (self.width, self.height):
-            self.width, self.height = width, height
-            self.root.geometry(f"{width}x{height}+{x}+{y}")
+        if (x, y, width, height) == (r.left, r.top, r.right - r.left, r.bottom - r.top) and                 (width, height) == (self.width, self.height):
+            return
+        self.width, self.height = width, height
+        self.root.geometry(f"{width}x{height}+{x}+{y}")
+        user32.SetWindowPos(self.hwnd, None, x, y, width, height, SWP_NOZORDER | SWP_NOACTIVATE)
 
     def set_alpha(self, alpha: float) -> None:
         self.root.attributes("-alpha", alpha)
