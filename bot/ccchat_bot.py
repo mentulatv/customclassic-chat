@@ -6,6 +6,10 @@ What it does, for each Discord server that invites it:
                webhook (members' apps post through it directly), makes the guild code, posts and
                pins how to join, and leaves the guild's details on the guild's encrypted channel
                for members' apps to pick up.
+               The same guild name bound again in another channel of the server moves there and
+               keeps its code; a guild belongs to its Discord server (another server's guild of
+               the same name is another guild, with its own code).
+  /rename      (server admins) renames the guild bound to the channel; its code stays.
   /unbind      (server admins) undoes it: members' apps stop sharing, the webhook is removed.
   /guildcode   tells whoever asks the guild code, privately.
   /chatlink    gives whoever asks, privately, a link that logs their CustomClassic Chat in as their
@@ -70,6 +74,17 @@ class Store:
     def by_server(self, server_id: str) -> list[sqlite3.Row]:
         with self.lock:
             return self.db.execute("SELECT * FROM guilds WHERE server_id=?", (server_id,)).fetchall()
+
+    def by_name(self, server_id: str, name: str) -> sqlite3.Row | None:
+        """The guild of this name already bound in this Discord server, if any."""
+        with self.lock:
+            return self.db.execute("SELECT * FROM guilds WHERE server_id=? AND lower(name)=lower(?)",
+                                   (server_id, name.strip())).fetchone()
+
+    def rename(self, channel_id: str, name: str) -> None:
+        with self.lock:
+            self.db.execute("UPDATE guilds SET name=? WHERE channel_id=?", (name, channel_id))
+            self.db.commit()
 
     def key_taken(self, key: str) -> bool:
         with self.lock:
@@ -246,23 +261,63 @@ def make_bot(store: Store, channels: Channels, key=None):
                 f"This channel is bound already, for **{old['name']}** ({old['key']}). /unbind first to start over.",
                 ephemeral=True)
             return
-        key = guild_key_for(store)
+        # the same guild bound in another channel of this server moves here and keeps its code, so
+        # members don't need a new one; another guild's name gets a code of its own
+        moving = store.by_name(str(interaction.guild_id), guild_name)
+        key = moving["key"] if moving else guild_key_for(store)
         try:
             hook = await channel.create_webhook(name="CustomClassic Chat relay", reason="CustomClassic Chat /bind")
         except discord.Forbidden:
             await interaction.response.send_message(
                 "I can't make a webhook here: give me the Manage Webhooks permission for this channel.", ephemeral=True)
             return
+        if moving:
+            store.remove(moving["channel_id"])
+            try:
+                await (await client.fetch_webhook(int(moving["webhook_id"]))).delete(reason="CustomClassic Chat moved")
+            except Exception:
+                pass
+            old = client.get_channel(int(moving["channel_id"]))
+            if old is not None:
+                try:
+                    await old.send(f"**{moving['name']}**'s guild chat moved to {channel.mention}.")
+                except discord.HTTPException:
+                    pass
         store.add(str(interaction.guild_id), str(channel.id), key, guild_name.strip()[:40], hook.url, str(hook.id))
         channels.put_cfg(store.by_channel(str(channel.id)))
         await interaction.response.send_message(
-            f"**{gr.clean(guild_name)[:40]}**'s guild chat now comes to this channel. " + gr.join_text(key) +
+            f"**{gr.clean(guild_name)[:40]}**'s guild chat now comes to this channel"
+            + (f" (moved from <#{moving['channel_id']}>, same code). " if moving else ". ") + gr.join_text(key) +
             " Lost it? Type /guildcode. To type here from the game's overlay: /chatlink.")
         try:  # the code stays at the top of the channel for everyone
             await (await interaction.original_response()).pin(reason="CustomClassic Chat: how to join")
         except discord.HTTPException:
             await interaction.followup.send("Tip: give me Manage Messages in this channel and I'll pin the code "
                                             "next time; members can always get it with /guildcode.", ephemeral=True)
+
+    @tree.command(name="rename", description="Rename the guild bound to this channel; its code stays the same.")
+    @app_commands.describe(guild_name="The guild's new name in the game")
+    @app_commands.default_permissions(administrator=True)
+    @app_commands.guild_only()
+    async def rename(interaction: discord.Interaction, guild_name: str):
+        if not is_admin(interaction):
+            await interaction.response.send_message("Only the server's admins can rename the guild.", ephemeral=True)
+            return
+        row = store.by_channel(str(interaction.channel_id))
+        if not row:
+            await interaction.response.send_message("This channel isn't bound: /bind it first.", ephemeral=True)
+            return
+        name = guild_name.strip()[:40]
+        other = store.by_name(str(interaction.guild_id), name)
+        if not name or (other and other["channel_id"] != row["channel_id"]):
+            await interaction.response.send_message(
+                "Another channel here is bound to a guild of that name." if name else "Type the new name.",
+                ephemeral=True)
+            return
+        store.rename(row["channel_id"], name)
+        channels.put_cfg(store.by_channel(row["channel_id"]))  # members' apps show the new name
+        await interaction.response.send_message(
+            f"Renamed **{row['name']}** to **{gr.clean(name)}**. The guild code stays the same.")
 
     @tree.command(name="unbind", description="Unbind CustomClassic Chat from this channel: members' apps stop sharing.")
     @app_commands.default_permissions(administrator=True)

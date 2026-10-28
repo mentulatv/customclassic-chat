@@ -30,6 +30,17 @@ def test_setting_up_a_guild_and_members_hearing_it(tmp_path):
     assert not other.cfg.get("webhook")
 
 
+def test_the_same_guild_is_found_by_name_in_its_server(tmp_path):
+    store = b.Store(tmp_path / "bot.sqlite3")
+    store.add("server-1", "chan-1", "ABCD-EFGH-JKLM", "Nimbus", HOOK, "1")
+    assert store.by_name("server-1", " nimbus ")["key"] == "ABCD-EFGH-JKLM"  # moving keeps this code
+    assert store.by_name("server-2", "Nimbus") is None  # another Discord server's Nimbus is another guild
+    assert store.by_name("server-1", "Cumulus") is None
+    store.rename("chan-1", "Cumulus")  # a new name, the same code
+    assert store.by_name("server-1", "cumulus")["key"] == "ABCD-EFGH-JKLM"
+    assert b.cfg_of(store.by_channel("chan-1"))["name"] == "Cumulus"
+
+
 def test_only_guild_codes_join(tmp_path):
     store = b.Store(tmp_path / "bot.sqlite3")
     key = b.guild_key_for(store)

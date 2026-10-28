@@ -37,7 +37,15 @@ Discord messages to the members' Guild tabs.
 
 **To stop:** type `/unbind` in the channel. Members' apps stop sharing.
 
-The bot's commands: `/bind` and `/unbind` (admins), `/guildcode` and `/chatlink` (everyone).
+**Renaming:** `/rename` in the bound channel changes the guild's name (if your first choice was
+taken in the game, say); the code stays the same. **Moving:** `/bind` with the same guild name in
+another channel moves the guild there, also keeping its code.
+
+A guild belongs to its Discord server: a guild of the same name in another server is another
+guild, with its own code.
+
+The bot's commands: `/bind`, `/rename` and `/unbind` (admins), `/guildcode` and `/chatlink`
+(everyone).
 
 ---
 
