@@ -443,3 +443,4 @@ def test_a_short_or_closed_game_chat_is_noticed():
     # the panel starts a little below the game chat's top, so its resize edge stays free
     r = mc.anchored({"left": 100, "top": 500, "width": 400, "height": 160}, 16, 18)
     assert r["top"] > 500 and r["top"] + r["height"] == 660 and r["width"] == 418
+
