@@ -429,3 +429,17 @@ def test_guild_chat_switches_on_with_its_colour_alone():
     buddy = {**m, "kind": "buddy"}
     assert all(guild_relay.relay_line(buddy, s) is None for s, _ in guild_relay.SOURCES)
     assert guild_relay.relay_line({**m, "kind": "map"}, "map") is None  # guild chat is the only chat that goes
+
+
+def test_a_short_or_closed_game_chat_is_noticed():
+    row = lambda top, text="[19:38] Rowan : hi", left=20: SimpleNamespace(top=top, bottom=top + 18, left=left, text=text)
+    # two lines right above the chat's bottom (128), a name tag far above: two lines
+    assert mc.short_chat([row(104), row(87, "Belli : stay"), row(20, "QuestGuy")], 128, 16, 400, 16) == 2
+    assert mc.short_chat([row(104)], 128, 16, 400, 16) == 1
+    assert mc.short_chat([row(40)], 128, 16, 400, 16) == 0  # nothing stacked on the bottom
+    # closed: the newest line shows in the typing bar, where an open chat has its button
+    assert mc.chat_closed([SimpleNamespace(text="Y0ungL1nk: S> Devil horns")])
+    assert not mc.chat_closed([SimpleNamespace(text="日")]) and not mc.chat_closed([SimpleNamespace(text="All")])
+    # the panel starts a little below the game chat's top, so its resize edge stays free
+    r = mc.anchored({"left": 100, "top": 500, "width": 400, "height": 160}, 16, 18)
+    assert r["top"] > 500 and r["top"] + r["height"] == 660 and r["width"] == 418

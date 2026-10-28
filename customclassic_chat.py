@@ -582,6 +582,37 @@ def panel_rect(read: dict, extra: int, bar: int = 0) -> dict:
             "height": read["height"] + extra}
 
 
+def anchored(read: dict, line: float, bar: int = 0) -> dict:
+    """The panel on the game's chat: its lines, starting a little below their top, so the
+    game's own resize edge above them stays free to drag (the panel follows the new size)."""
+    a = max(3, round(line * 0.25))
+    return {"left": read["left"], "top": read["top"] + a, "width": read["width"] + int(bar),
+            "height": read["height"] - a}
+
+
+CLOSED_LINE = re.compile(r"^\S{2,13}\s?:\s*\S")  # "Name : text" in the typing bar: the game's chat is closed
+
+
+def chat_closed(bar_read) -> bool:
+    """The game's chat closed completely: it then shows its newest message inside the typing bar
+    under where the chat was ("Name : text"), where an open chat has the chat-type button."""
+    return any(CLOSED_LINE.match(ln.text.strip()) for ln in bar_read)
+
+
+def short_chat(read, bottom: float, left: float, right: float, line: float) -> int:
+    """A chat too short for find_lines (one or two lines, where a time stamp may not be read):
+    how many rows are stacked right above its bottom, one line apart."""
+    rows = sorted((ln for ln in read if left - line <= ln.left <= right and ln.bottom <= bottom + line * 0.5),
+                  key=lambda ln: -ln.top)
+    top, n = None, 0
+    for ln in rows:
+        edge = bottom if top is None else top
+        if edge - ln.bottom > line * 0.8:
+            break
+        top, n = ln.top, n + 1
+    return n
+
+
 def chat_lines(read: dict | None, line: float) -> int:
     """How many lines the game's chat shows."""
     return round(read["height"] / line) if read and line else 0
@@ -1078,7 +1109,19 @@ def read_loop(app) -> None:
                         y1 = min(c["height"], int(r["top"] + r["height"] + line * 0.5))
                         img = frame_image(frame, ox + x0, oy + y0, ox + x1, oy + y1)
                         found = find_lines(img, reader) if img else None
-                        lost = 0 if found else lost + 1
+                        # closed completely? its newest line shows in the typing bar under it
+                        bar = frame_image(frame, ox + r["left"], oy + r["top"] + r["height"],
+                                          ox + r["left"] + r["width"], oy + r["top"] + r["height"] + line * 2)
+                        closed = not found and bool(bar) and chat_closed(reader.read(bar))
+                        if closed != app.chat_closed:
+                            app.events.put(("chat_closed", closed))
+                        if not found and not closed and img:  # one or two lines: find_lines can't tell
+                            n = short_chat(reader.read(img), r["top"] + r["height"] - y0, r["left"] - x0,
+                                           r["left"] - x0 + r["width"] * 0.6, line)
+                            if n:  # that many lines, up from its bottom
+                                found = ({"left": r["left"] - x0, "top": r["top"] + r["height"] - y0 - n * line,
+                                          "width": r["width"], "height": n * line}, app.line)
+                        lost = 0 if found or closed else lost + 1
                         if found and abs(found[1] - app.line) > app.line * 0.2:
                             app.want_fit = True  # the game's UI Size changed: the lines are another size, fit afresh
                         elif found:
@@ -1487,6 +1530,10 @@ class ChatView:
         if self.msgs.edit:
             self.start_edit_drag(e)
             return
+        if e.y < getattr(self, "warn_band", 0) and e.x < self.msgs.width - self.bar_px:  # the warning: put away
+            self.dismiss_warning()
+            self.render()
+            return
         if e.x >= self.msgs.width - self.bar_px:
             part = self.bar_hit(e.y)
             if part == "thumb":
@@ -1626,6 +1673,12 @@ class ChatView:
         shown = self.log.visible()
         end = len(shown) - self.scroll
         y, fits = h - 2 - self.input_height(), 0  # above the typing line on the Guild tab
+        # a warning (the game's chat too small, or closed) across the top; closed, it's all there is
+        warn = self.warning()
+        band = self.warn_band = (self.tab_font.metrics("linespace") + 8) if warn else 0
+        if warn and self is self.app and self.app.chat_closed:
+            shown = []
+            band = self.warn_band = h
         for m in reversed(shown[:max(0, end)]):
             star = "★ " if m.get("watch") and self.log.tab != "Watch" else ""
             t = c.create_text(pad, 0, anchor="nw", text=star + line_text(m, self.opts["timestamps"]),
@@ -1643,10 +1696,15 @@ class ChatView:
             if m.get("watch"):  # caught by the watch list: a gold edge
                 c.create_rectangle(0, y - th, 2, y - 1, fill=GOLD, outline="")
             y -= th
-            if y < 0:
+            if y < band:
                 break
             fits += 1
         self.in_view = max(1, fits)
+        if band:  # the warning, over the top of the messages
+            t = c.create_text(pad, 3, anchor="nw", text="⚠ " + warn, fill="#1a1205", font=self.tab_font,
+                              width=w - 2 * pad - b)
+            c.tag_raise(c.create_rectangle(0, 0, w - b - 1, band, fill=WARN, outline=""))
+            c.tag_raise(t)
         self.render_scrollbar(bgc, w, h, b, len(shown))
 
     def render_scrollbar(self, c, w: int, h: int, b: int, total: int) -> None:
@@ -1738,11 +1796,10 @@ class ExtraChat(ChatView):
         y0, h0, m0, extra0 = self.div_drag
         app, host, line, sh = self.app, self.host, self.line, strip_height(self.line)
         d = max(sh + 2 * round(line) + self.DIV - h0, e.y_root - y0)
-        on_chat = host is app and not app.is_free and app.read_rect and app.game
-        d = min(d, extra0 if on_chat else m0["height"] - sh - 2 * round(line))
+        d = min(d, m0["height"] - sh - 2 * round(line))
         self.conf["height"] = h0 + d
-        if on_chat:
-            app.opts["extra"] = extra0 - d
+        if host is app and not app.is_free:
+            app.split_room = h0 + d
         host.place({**m0, "top": m0["top"] + d, "height": m0["height"] - d})
 
     def on_div_release(self, e) -> None:
@@ -1770,8 +1827,14 @@ class ExtraChat(ChatView):
         save_settings(self.opts)
         self.apply_see_through()
 
-    def warning(self) -> None:
-        return None
+    def warning(self) -> str | None:
+        """The main panel's warning (the game's chat too small or closed), across the top of this
+        window too, over the messages it still shows."""
+        return self.app.warning()
+
+    def dismiss_warning(self) -> None:
+        self.app.dismiss_warning()
+        self.app.render()
 
     def tab_chosen(self, name: str) -> None:
         self.conf["tab"] = name
@@ -1832,8 +1895,10 @@ class ExtraChat(ChatView):
     def follow(self) -> None:
         if self.docked:
             if not self.grip:
-                p = self.host.placed()
+                p, host = self.host.placed(), self.host
                 h = int(self.conf.get("height") or 120)
+                if host is self.app and not host.is_free:  # on the game's chat: the room it was given
+                    h = getattr(host, "split_room", 0) or h
                 self.place({"left": p["left"], "top": p["top"] - h, "width": p["width"], "height": h})
             return
         if not self.msgs.edit and not self.grip and self.conf.get("free"):
@@ -1878,6 +1943,7 @@ class ChatPanel(ChatView):
         self.root = self.msgs.root
         self.dismissed = None      # the game chat's line count when the ⚠ was clicked away
         self.covered = False       # the game is drawing something over its chat: step aside
+        self.chat_closed = False   # the game's chat is closed completely: say so, and stay
         self.fit_asked = 0.0
         self.explained = False     # the "chat too small" note, once a session
         self.settings = None
@@ -2062,16 +2128,20 @@ class ChatPanel(ChatView):
         self.hint_font = tkfont.Font(family=FONT, size=-max(13, round(self.line * 0.85)), weight="bold")
 
     def warning(self) -> str | None:
-        """Why lines may slip by, if they may: the game's chat is minimised or shows only one
-        or two lines. Clicking the ⚠ puts it away until the chat's size changes again."""
+        """Why lines may slip by, if they may: the game's chat is closed, or shows fewer than 3
+        lines (a long megaphone takes two). Clicking the ⚠ (or the warning) puts it away until
+        the chat changes again."""
+        if self.chat_closed:
+            return None if self.dismissed == "closed" else "The game's chat is closed: open it so it can be read"
         n = chat_lines(self.read_rect, self.line)
         if self.read_rect and n < self.opts["min_lines"] and n != self.dismissed:
-            return f"the game's chat shows only {n} line{'s' if n != 1 else ''}"
+            return (f"The game's chat shows only {n} line{'s' if n != 1 else ''}: make it at least 3 lines tall "
+                    "(4 or more is best)")
         return None
 
     def explain(self, reason: str) -> None:
-        self.events.put(("status", f"⚠ Lines may slip by: {reason}, so megaphones arriving together can scroll "
-                                   "away unread. Make the game's chat taller to catch them all. Click ⚠ to hide this."))
+        self.events.put(("status", f"⚠ {reason}. Megaphones arriving together may scroll away unread "
+                                   "otherwise. Click the warning to hide it."))
 
     # placing ----------------------------------------------------------------
 
@@ -2097,7 +2167,8 @@ class ChatPanel(ChatView):
         save_settings(self.opts)
 
     def dismiss_warning(self) -> None:
-        self.dismissed = chat_lines(self.read_rect, self.line)  # the ⚠ clicked: put away for this chat size
+        # the ⚠ (or the warning) clicked: put away for this chat size, or while it's closed
+        self.dismissed = "closed" if self.chat_closed else chat_lines(self.read_rect, self.line)
 
     def grip_on_chat(self, e) -> None:
         """The ≡ grip on the game's chat: the panel reaches higher than the game's chat, as the game's does."""
@@ -2108,6 +2179,15 @@ class ChatPanel(ChatView):
             self.opts["extra"] = max(0, min(top_room, extra0 + (y0 - e.y_root)))
             read = {**self.read_rect, "left": c["left"] + self.read_rect["left"], "top": c["top"] + self.read_rect["top"]}
             self.place(panel_rect(read, self.opts["extra"], self.bar_px))
+
+    def on_chat(self, full: dict) -> dict:
+        """The panel on the game's chat, with its split (if any) taking the top of that room."""
+        split = self.split_of()
+        self.split_room = 0
+        if split is not None:
+            self.split_room = h = max(0, min(int(split.conf.get("height") or 0), full["height"] // 2))
+            full = {**full, "top": full["top"] + h, "height": full["height"] - h}
+        return full
 
     def free_rect(self) -> dict:
         """Where an unlocked panel sits: where it was put, or back in view if that's off every monitor."""
@@ -2164,13 +2244,10 @@ class ChatPanel(ChatView):
             self.events.put(("status", "That window is split already: right-click → Remove the split."))
             return
         h, p = round(self.line * 5) + 20, host.placed()
-        if host is self and not self.is_free:
-            take = min(h, int(self.opts["extra"]))
-            self.opts["extra"] -= take
-        else:
-            take = h = min(h, p["height"] // 2)
-            host.keep({**p, "top": p["top"] + take, "height": p["height"] - take})
-        host.place({**p, "top": p["top"] + take, "height": p["height"] - take})
+        h = min(h, p["height"] // 2)
+        if not (host is self and not self.is_free):  # (on the game's chat, it's re-placed with its split)
+            host.keep({**p, "top": p["top"] + h, "height": p["height"] - h})
+        host.place({**p, "top": p["top"] + h, "height": p["height"] - h})
         conf = {"dock": "above", "tab": "Mega", "see_through": False, "height": h}
         if host is not self:
             conf["host"] = host.conf["id"]
@@ -2201,7 +2278,7 @@ class ChatPanel(ChatView):
             host, h = w.host, int(w.conf.get("height") or 0)
             p = host.placed()
             if host is self and not self.is_free:
-                self.opts["extra"] += h
+                self.split_room = 0
             elif host.is_free:
                 host.keep({**p, "top": p["top"] - h, "height": p["height"] + h})
             host.place({**p, "top": p["top"] - h, "height": p["height"] + h})
@@ -2236,7 +2313,11 @@ class ChatPanel(ChatView):
                                   "top": rect["top"] - game["client"]["top"], "width": rect["width"],
                                   "height": rect["height"]}
                 if not unlocked:
-                    self.place(panel_rect(rect, self.opts["extra"], self.bar_px))
+                    full = anchored(rect, self.line, self.bar_px)
+                    if self.chat_closed and self.warning():  # one line right above the typing bar: what's wrong
+                        h = strip_height(self.line) + round(self.line * 1.6)
+                        full = {**full, "top": full["top"] + full["height"] - h, "height": h}
+                    self.place(self.on_chat(full))
                 reason = self.warning()
                 if reason and not self.explained:
                     self.explained = True
@@ -2246,7 +2327,7 @@ class ChatPanel(ChatView):
             up = bool(game) or self.always_show
             # unlocked, it isn't over the game's chat: nothing there to step aside for
             # (while typing in it, nothing the game draws over its chat sends it away)
-            stays = unlocked or self.typing
+            stays = unlocked or self.typing or self.chat_closed  # closed: it stays, saying so
             visible = bool(up and (rect or unlocked)) and not self.user_hidden and not (self.covered and not stays)
             self.show(visible)
             for w in self.windows:  # a split goes with the panel; a window is never over the game's chat
@@ -2330,6 +2411,9 @@ class ChatPanel(ChatView):
                     save_settings(self.opts)
                 elif kind == "covered":
                     self.covered = data
+                elif kind == "chat_closed":
+                    self.chat_closed = data
+                    changed = True
                 elif kind == "status":
                     now = time.time()
                     if (data, ) != getattr(self, "_last_status", (None, ))[:1] or now - self._last_status[1] > 60:

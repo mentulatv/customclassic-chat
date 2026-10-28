@@ -93,7 +93,7 @@ python.exe to PATH"), download this repository, double-click **`setup.bat`** onc
 | **◐** (right end) | See-through: messages 90% see-through and click-through until clicked again. |
 | **+** (next to ◐) | Split this window: a pane on top of it with its own tabs (shown while it isn't split). |
 | **Corner grip** (right end) | Drag to resize: wider to the right, taller upward; the bottom-left corner stays. On extra windows and an unlocked panel: the chat on the game's chat box stays put. |
-| **⚠** (amber) | Only when the game's chat is minimised or shows one or two lines: megaphones arriving together may scroll away unread. Make the game's chat taller, or click ⚠ to hide it. |
+| **⚠** (amber) | When the game's chat shows fewer than 3 lines (a long megaphone takes two; 4 or more is best) or is closed: an amber line says so across the top of every chat window, since megaphones arriving together could scroll away unread. With the game's chat closed, the chat on it shrinks to just that line. Make the game's chat taller (drag its top edge: the chat on it follows), or click the warning to put it away. |
 
 **Scrolling:** the arrows (hold to keep going), the track, dragging the thumb, or the mouse
 wheel. New messages don't pull you down while you're reading back.
