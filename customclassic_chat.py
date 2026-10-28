@@ -861,7 +861,7 @@ def start_tray(app):
     send = lambda *e: (lambda icon, item: app.events.put(e))  # noqa: E731
     menu = pystray.Menu(
         pystray.MenuItem("Show / hide", send("hotkey", HK_HIDE), default=True),
-        pystray.MenuItem("Adjust position", send("hotkey", HK_EDIT)),
+        pystray.MenuItem("Move or resize…", send("hotkey", HK_EDIT)),
         pystray.MenuItem("Unlocked (place it anywhere)", send("unlock", None), checked=lambda item: app.opts["unlocked"]),
         pystray.MenuItem("Reset position", send("hotkey", HK_FIT)),
         pystray.MenuItem("Split the chat", send("split", None)),
@@ -1126,7 +1126,7 @@ class ChatView:
     panel is one (on the game's chat box, or wherever it was unlocked to); extra windows are
     others, each wherever it was put. They all show the same chat, read once."""
 
-    closable = False  # an ✕ on the tab strip (extra windows)
+    closable = False  # Close in its right-click menu (extra windows)
 
     def build(self, title: str, master=None) -> None:
         overlay = self.app.overlay
@@ -1243,10 +1243,13 @@ class ChatView:
 
     def edit_zone(self, x: int, y: int) -> str:
         """Which part of the window a press at screen (x, y) grabs: "n", "se", "w" ... or "move"."""
-        r = self.placed()
+        r = self.placed()  # (only a press really on an edge grabs it: one beside the window just moves it)
         e = self.EDGE
-        v = "n" if y - r["top"] < e else ("s" if r["top"] + r["height"] - y < e else "")
-        h = "w" if x - r["left"] < e else ("e" if r["left"] + r["width"] - x < e else "")
+
+        def near(d: int) -> bool:
+            return 0 <= d < e
+        v = "n" if near(y - r["top"]) else ("s" if near(r["top"] + r["height"] - y) else "")
+        h = "w" if near(x - r["left"]) else ("e" if near(r["left"] + r["width"] - x) else "")
         return (v + h) or "move"
 
     CURSORS = {"move": "fleur", "n": "sb_v_double_arrow", "s": "sb_v_double_arrow", "e": "sb_h_double_arrow",
@@ -1256,9 +1259,8 @@ class ChatView:
         """While adjusting, the pointer shows what a press would do there."""
         if self.msgs.edit:
             cursor = self.CURSORS[self.edit_zone(e.x_root, e.y_root)]
-        else:  # the ≡ grip and the tab row's top edge show they resize, like the game chat's top
-            on_strip = e.widget is self.strip.canvas
-            cursor = "sb_v_double_arrow" if on_strip and (e.x < strip_height(self.line) + 4 or e.y < 4) else ""
+        else:  # the corner grip shows it resizes
+            cursor = "size_ne_sw" if e.widget is self.strip.canvas and self.in_corner(e.x) else ""
         if self.grip:
             return
         for w in (self.msgs, self.strip):
@@ -1328,42 +1330,45 @@ class ChatView:
         if self.msgs.edit:  # adjusting: the tab row moves the window, its top edge and corners resize it
             self.start_edit_drag(e)
             return
+        if self.in_corner(e.x):  # the corner grip: drag to resize, the bottom-left corner stays
+            self.grip = (e.x_root, e.y_root, self.opts["extra"], self.panel_now())
+            return
+        if e.x < strip_height(self.line) + 4:  # ≡: the menu, opened as the button is let go
+            self.menu_on_release = True
+            return
         for name, x0, x1 in self.buttons():
             if x0 - 2 <= e.x < x1 + 2:
-                if name == "close":
-                    self.close()
-                    return
                 {"see": self.toggle_see_through, "split": self.app.add_split, "warn": self.dismiss_warning}[name]()
                 self.render()
                 return
-        # anywhere else on the tab row: dragged up or down it resizes, like the game's chat (the ≡ grip
-        # too); let go without dragging and it was a click on a tab
-        self.grip = (e.y_root, self.opts["extra"], self.panel_now())
-        self.grip_moved = False
-        self.grip_x = e.x
-
-    GRIP_SLOP = 4  # pixels the pointer moves up or down before a press on the tab row is a resize
-
-    def pick_tab(self, x: int) -> None:
         for name, x0, x1 in self.tab_spans():
-            if x0 <= x < x1:
+            if x0 <= e.x < x1:
                 self.log.select(name)
                 self.scroll = 0
                 self.tab_chosen(name)
         self.render()
 
-    BUTTON_TEXT = {"close": "✕", "see": "◐", "split": "+"}
+    def can_resize(self) -> bool:
+        """Whether the corner grip shows: everywhere but on a split (its divider sizes it)."""
+        return True
+
+    def corner_px(self) -> int:
+        return self.strip.height - 4 if self.can_resize() else 0
+
+    def in_corner(self, x: int) -> bool:
+        return self.can_resize() and x >= self.strip.width - self.corner_px() - 4
+
+    BUTTON_TEXT = {"see": "◐", "split": "+"}
 
     def can_split(self) -> bool:
         return False
 
     def buttons(self) -> list[tuple[str, int, int]]:
-        """The buttons at the right end of the tab strip, right to left, as (name, x0, x1): ✕ on an
-        extra window, ◐, + to split the chat (while it isn't), and the ⚠ when there is one."""
+        """The buttons at the right end of the tab strip (left of the corner grip), right to left, as
+        (name, x0, x1): ◐, + to split the chat (while it isn't), and the ⚠ when there is one."""
         s = self.strip.height - 4
-        x = self.strip.width - s - 4
-        names = (["close"] if self.closable else []) + ["see"] + (["split"] if self.can_split() else []) + \
-            (["warn"] if self.warning() else [])
+        x = self.strip.width - s - 4 - (self.corner_px() + 4 if self.can_resize() else 0)
+        names = ["see"] + (["split"] if self.can_split() else []) + (["warn"] if self.warning() else [])
         out = []
         for name in names:
             out.append((name, x, x + s))
@@ -1381,20 +1386,27 @@ class ChatView:
         else:
             m.add_command(label="Remove the split", command=split.close)
         m.add_command(label="New chat window", command=app.add_window)
-        if self.closable and not self.docked:  # a split's own menu already offers removing it
-            m.add_command(label="Close this window", command=self.close)
         m.add_separator()
         m.add_command(label=("✓ " if self.see_through else "") + "See-through", command=lambda: (
             self.toggle_see_through(), self.render()))
-        m.add_command(label="Adjust position (Ctrl+Alt+F5)", command=lambda: app.on_hotkey(HK_EDIT))
+        m.add_command(label="Move or resize… (Ctrl+Alt+F5)", command=lambda: app.on_hotkey(HK_EDIT))
         m.add_command(label="Settings…", command=app.open_settings)
+        m.add_separator()
+        if not self.closable:  # the chat on the game's chat box: hidden, and Show in the tray brings it back
+            m.add_command(label="Hide the chat (tray icon → Show brings it back)",
+                          command=lambda: app.on_hotkey(HK_HIDE))
         open_ = threading.Event()
         open_.set()
         threading.Thread(target=close_menu_when_left, args=(open_, float(self.opts["menu_close_s"] or 0)),
                          daemon=True).start()
+        if self.closable and not self.docked:  # (a split: Remove the split, above)
+            m.add_command(label="Close this window", command=self.close)
+        import overlay
+        overlay.HOLD = True  # the chat windows' re-raising waits: the menu stays on top
         try:
             m.tk_popup(e.x_root + 2, e.y_root + 2)  # just off the pointer, so nothing is under it
         finally:
+            overlay.HOLD = False
             open_.clear()
             m.grab_release()
 
@@ -1402,32 +1414,25 @@ class ChatView:
         if self.drag:
             self.edit_drag(e)
             return
-        if self.grip and not self.grip_moved:
-            if abs(e.y_root - self.grip[0]) < self.GRIP_SLOP:
-                return
-            self.grip_moved = True
-            for w in (self.msgs, self.strip):
-                w.canvas.configure(cursor="sb_v_double_arrow")
-        if self.grip and self.is_free:  # grows upward from its bottom, like the game's chat
-            y0, _, p = self.grip
+        if self.grip and self.is_free:  # wider to the right, taller upward: the bottom-left corner stays
+            x0, y0, _, p = self.grip
             bottom = p["top"] + p["height"]
+            w = max(200, p["width"] + (e.x_root - x0))
             h = max(2 * round(self.line) + strip_height(self.line), p["height"] + (y0 - e.y_root))
-            self.place({**p, "top": bottom - h, "height": h})
-        elif self.grip:
+            self.place({**p, "top": bottom - h, "height": h, "width": w})
+        elif self.grip:  # on the game's chat its width is the chat's: only taller, like the game's
             self.grip_on_chat(e)
 
     def on_grip_release(self, e) -> None:
         self.drag = None
+        if getattr(self, "menu_on_release", False):
+            self.menu_on_release = False
+            self.menu(e)
+            return
         if self.grip:
             self.grip = None
-            for w in (self.msgs, self.strip):
-                w.canvas.configure(cursor="")
-            if not self.grip_moved:  # a click, not a drag
-                if self.grip_x >= strip_height(self.line) + 4:  # (the ≡ grip itself isn't a tab)
-                    self.pick_tab(self.grip_x)
-                return
             if self.is_free:
-                self.keep(self.panel_now())
+                self.keep(self.placed())  # as just put: Windows reports the move a moment later
             save_settings(self.opts)
 
     # scrolling, like the game's chat ---------------------------------------
@@ -1583,6 +1588,10 @@ class ChatView:
             c.create_rectangle(x0, 2, x1, h - 2, fill=TAB_ON if on else TAB, outline="")
             c.create_text((x0 + x1) // 2, h // 2 + 1, text=self.BUTTON_TEXT[name], fill=INK if on else SOFT,
                           font=self.tab_font)
+        if self.can_resize() and not self.msgs.edit:  # the corner grip: three diagonal strokes
+            x1, s = self.strip.width - 4, self.corner_px()
+            for k in (0.3, 0.6, 0.9):
+                c.create_line(x1 - s * k, 3, x1, 3 + s * k, fill=SOFT, width=2)
         if self.msgs.edit:
             self.draw_adjust(c, self.strip.width, h, bottom=False)
 
@@ -1750,6 +1759,9 @@ class ExtraChat(ChatView):
         """A split: docked on top of the main panel, as wide as it and moving with it."""
         return self.conf.get("dock") == "above"
 
+    def can_resize(self) -> bool:
+        return not self.docked
+
     def keep(self, rect: dict) -> None:
         if self.docked:  # only its height is its own
             self.conf["height"] = rect["height"]
@@ -1781,7 +1793,7 @@ class ExtraChat(ChatView):
             self.div.show(visible)
 
     def keep_adjusted(self) -> None:
-        self.keep(self.panel_now())
+        self.keep(self.placed())
 
     def set_edit(self, on: bool) -> bool:
         return False if self.docked else ChatView.set_edit(self, on)  # a split goes where the panel goes
@@ -2053,7 +2065,7 @@ class ChatPanel(ChatView):
     def grip_on_chat(self, e) -> None:
         """The ≡ grip on the game's chat: the panel reaches higher than the game's chat, as the game's does."""
         if self.read_rect and self.game:
-            y0, extra0, _ = self.grip
+            _, y0, extra0, _ = self.grip
             c = self.game["client"]
             top_room = c["top"] + self.read_rect["top"]  # up to the top of the screen
             self.opts["extra"] = max(0, min(top_room, extra0 + (y0 - e.y_root)))
@@ -2305,9 +2317,9 @@ class ChatPanel(ChatView):
         """Adjusting ended: keep the panel where it was put (unlocked), or take it as the game's
         chat box (on the chat)."""
         if self.opts["unlocked"]:
-            self.keep(self.panel_now())
+            self.keep(self.placed())
         elif self.game:
-            c, p = self.game["client"], self.panel_now()
+            c, p = self.game["client"], self.placed()
             extra = max(0, min(self.opts["extra"], p["height"] - 2 * round(self.line)))
             box = {"left": p["left"] - c["left"], "top": p["top"] - c["top"] + extra,
                    "width": p["width"] - self.bar_px, "height": p["height"] - extra, "bar": self.bar_px}

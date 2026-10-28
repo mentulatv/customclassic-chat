@@ -37,6 +37,7 @@ if user32:
                                     ctypes.c_int, ctypes.c_int, ctypes.c_uint]
 GWLP_HWNDPARENT = -8  # a top-level window's owner
 CEILING = None  # a window (the settings) every Overlay stays under while it's open, rather than on top of it
+HOLD = False  # a menu is open: no Overlay re-raises itself over it until it closes
 
 
 def set_ceiling(window) -> None:
@@ -147,6 +148,10 @@ class Overlay:
 
     def keep_on_top(self, again: bool = True) -> None:
         if not self.root.winfo_exists():  # closed (a pop-up note): stop
+            return
+        if HOLD:
+            if again:
+                self.root.after(2000, self.keep_on_top)
             return
         ceiling = CEILING if CEILING and user32.IsWindow(CEILING) else None
         after = self.below.hwnd if self.below else (ceiling or HWND_TOPMOST)

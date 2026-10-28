@@ -319,7 +319,7 @@ class SettingsWindow:
             note.configure(text="Not split." if not n else f"Split into {n + 1} panes.")
         show_splits()
 
-        c = card(page, "Extra chat windows", "More windows anywhere on screen, each with its own tab; ✕ closes one.")
+        c = card(page, "Extra chat windows", "More windows anywhere on screen, each with its own tab; right-click one to close it.")
         row = tk.Frame(c, bg=CARD)
         row.pack(fill="x")
         button(row, "Add a chat window", app.add_window, primary=True).pack(side="left")
