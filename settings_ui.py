@@ -105,6 +105,11 @@ class SettingsWindow:
             top.iconbitmap(str(app.icon_path()))
         except Exception:
             pass
+        # the chat windows keep themselves on top of the game: while this is open they stay under it
+        import overlay
+        top.update_idletasks()
+        overlay.set_ceiling(top)
+        top.bind("<Destroy>", lambda e: e.widget is top and overlay.set_ceiling(None), add="+")
 
         side = tk.Frame(top, bg=SIDE, width=180)
         side.pack(side="left", fill="y")

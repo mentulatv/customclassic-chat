@@ -36,6 +36,13 @@ if user32:
     user32.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int,
                                     ctypes.c_int, ctypes.c_int, ctypes.c_uint]
 GWLP_HWNDPARENT = -8  # a top-level window's owner
+CEILING = None  # a window (the settings) every Overlay stays under while it's open, rather than on top of it
+
+
+def set_ceiling(window) -> None:
+    """Keep every Overlay under this Tk window (None: on top of everything again)."""
+    global CEILING
+    CEILING = user32.GetAncestor(window.winfo_id(), 2) if window is not None else None
 
 
 def hotkey_thread(events: queue.Queue, keys: dict[int, int]) -> None:
@@ -141,7 +148,8 @@ class Overlay:
     def keep_on_top(self, again: bool = True) -> None:
         if not self.root.winfo_exists():  # closed (a pop-up note): stop
             return
-        after = self.below.hwnd if self.below else HWND_TOPMOST
+        ceiling = CEILING if CEILING and user32.IsWindow(CEILING) else None
+        after = self.below.hwnd if self.below else (ceiling or HWND_TOPMOST)
         user32.SetWindowPos(self.hwnd, after, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE)
         for o in self.behind:
             if not o.hidden and o.root.winfo_exists():
