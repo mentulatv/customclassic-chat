@@ -368,15 +368,14 @@ class SettingsWindow:
                        "Off. Tick Show Twitch chat to turn it on.")
 
     def discord(self, page) -> None:
-        """Guild ↔ Discord on one page: joining with the guild code, logging in to type, and (for the
-        server's admins) binding the bot to the guild's channel."""
+        """Guild ↔ Discord on one page: joining with the guild code (the guild chat this app reads is
+        then shared), an optional Discord identity on what you type, and (for the server's admins)
+        binding the bot to the guild's channel."""
         app, opts, top = self.app, self.opts, self.top
         code = self.discord_code = tk.StringVar(value=guild_relay.key_label(opts["relay_code"]))
-        share = tk.BooleanVar(value=opts["relay_share"])
         tab = tk.BooleanVar(value=opts["relay_tab"])
-        source = tk.StringVar(value=opts["relay_source"] if opts["relay_source"] in dict(guild_relay.SOURCES)
-                              else "guild")
-        c = card(page, "1. Join your guild", "Get the code with /guildcode in your guild's Discord.")
+        c = card(page, "1. Join your guild", "Get the code with /guildcode in your guild's Discord. Joined, your "
+                                             "guild chat goes to the guild's Discord channel.")
         row = tk.Frame(c, bg=CARD)
         row.pack(fill="x")
         label(row, "Guild code").pack(side="left")
@@ -385,15 +384,8 @@ class SettingsWindow:
         note = label(c, "", soft=True, size=9, wrap=470)
         waiting = label(c, "", size=9, wrap=470)
         waiting.configure(fg=WARN)
-
-        def show_waiting():
-            if source.get() == "guild" and not app.guild_colour_known():
-                waiting.configure(text="No guild chat in the game yet: share map chat or whispers to try it.")
-            elif source.get() != "guild":
-                kind = dict(guild_relay.SOURCES)[source.get()].split(" (")[0].lower()
-                waiting.configure(text=f"Testing: your {kind} goes to the guild's Discord, labelled as such.")
-            else:
-                waiting.configure(text="")
+        if not app.guild_colour_known():
+            waiting.configure(text="The game doesn't have guild chat yet: it's shared as soon as it does.")
 
         def show_status():
             key = guild_relay.guild_key(code.get())
@@ -404,17 +396,15 @@ class SettingsWindow:
             cfg = opts["relay_cfg"].get(key) or opts["relay_admin"].get(key) or {}
             peer = app.relay
             if not peer:
-                note.configure(text="Tick sharing or the Guild tab to join.", fg=SOFT)
+                note.configure(text="Press Join.", fg=SOFT)
                 return
             online = peer.members()
             name = cfg.get("name") or peer.cfg.get("name")
             where = f"{name} · " if name else "Waiting for the guild's details… · "
-            what = dict(guild_relay.SOURCES)[peer.source].split(" (")[0].lower()
-            doing = (f" · your {what}: {peer.shared} shared, {peer.posted} posted from here" if peer.share
-                     else " · not sharing")
             no_bot = (" · no bot, so no Discord messages here"
                       if peer.tab and peer.cfg.get("webhook") and not peer.cfg.get("has_bot") else "")
-            note.configure(text=where + f"{online} app{'s' if online != 1 else ''} online" + doing + no_bot +
+            note.configure(text=where + f"{online} app{'s' if online != 1 else ''} online · {peer.shared} shared, "
+                                f"{peer.posted} posted from here" + no_bot +
                            (f". Problem: {peer.error}." if peer.error else ""), fg=WARN if peer.error else SOFT)
 
         def use(*_):
@@ -422,62 +412,51 @@ class SettingsWindow:
             if code.get().strip() and not key:
                 show_status()
                 return
-            app.set_relay(key, share.get(), tab.get(), source.get())
+            app.set_relay(key, tab.get())
             code.set(guild_relay.key_label(key))
-            show_waiting()
             note.configure(text="Joining…" if app.relay else "", fg=SOFT)
         button(row, "Join", use).pack(side="left")
         field.bind("<Return>", use)
-        check(c, "Share my chat:", share, use).pack(fill="x", pady=(8, 0))
-        row = tk.Frame(c, bg=CARD)
-        row.pack(fill="x", padx=(22, 0))
-        for value, text in guild_relay.SOURCES:
-            radio(row, text, source, value, use).pack(side="left", padx=(0, 12))
-        check(c, "Show a Guild tab (the Discord channel, and typing to it)", tab, use).pack(fill="x", pady=(4, 0))
+        check(c, "Show a Guild tab (the Discord channel, and typing to it)", tab, use).pack(fill="x", pady=(8, 0))
         waiting.pack(fill="x", pady=(6, 0))
         note.pack(fill="x", pady=(4, 0))
-        show_waiting()
 
         def tick():  # the status kept current while the window is open
             if top.winfo_exists():
                 show_status()
+                show_identity()
                 top.after(3000, tick)
-        tick()
 
-        c = card(page, "2. Log in to type (optional)", "/chatlink in your guild's Discord, then open its link.")
+        c = card(page, "2. Your Discord identity (optional)",
+                 "What you type goes under your character's name. To add your Discord name (✓): /chatlink in "
+                 "your guild's Discord, then open its link.")
         row = tk.Frame(c, bg=CARD)
         row.pack(fill="x")
-        label(row, "Your character's name").pack(side="left")
-        game = tk.StringVar(value=opts["game_name"] or next(iter(opts["ignore_names"]), ""))
-        entry(row, game, 16).pack(side="left", padx=8, ipady=2)
-        who = label(c, "", size=9, wrap=470)
-        who.pack(fill="x", pady=(6, 0))
+        who = label(row, "", size=9, wrap=380)
+        who.pack(side="left")
 
-        def show_login(*_):
-            if game.get().strip() != opts["game_name"]:
-                app.set_opt("game_name", game.get().strip())
-                if app.relay:
-                    app.relay.game_name = app.game_name()
+        def show_identity():
             claims = guild_relay.check_login(opts["guild_login"]) if opts["guild_login"] else None
+            game = app.game_name()
             if claims:
                 days = max(0, int((claims["exp"] - __import__("time").time()) // 86400))
-                who.configure(text=f"Logged in ✓ ({days} days left). You show as "
-                                   f"{guild_relay.who(app.game_name(), claims['name'])}.", fg=INK)
+                who.configure(text=f"You type as {guild_relay.who(game or '?', claims['name'])} ✓ "
+                                   f"({days} days left).", fg=INK)
             else:
-                who.configure(text="Not logged in." if not opts["guild_login"] else
-                              "Your login has run out: /chatlink again.", fg=SOFT)
-        game.trace_add("write", show_login)
+                ran_out = " (your Discord identity ran out: /chatlink again)" if opts["guild_login"] else ""
+                who.configure(text=(f"You type as {game}{ran_out}." if game else
+                                    "Your character's name is read from the game's status bar."), fg=SOFT)
 
-        def log_out():
+        def remove():
             app.set_opt("guild_login", "")
             if app.relay:
                 app.relay.login = ""
             out.pack_forget()
-            show_login()
-        out = button(row, "Log out", log_out)
-        if opts["guild_login"]:  # nothing to log out of otherwise
+            show_identity()
+        out = button(row, "Remove", remove)
+        if opts["guild_login"]:  # nothing to remove otherwise
             out.pack(side="right")
-        show_login()
+        tick()
 
         # ---- 3. the server's admins, once
         c = card(page, "Set up your guild's Discord (admins, once)",
@@ -571,7 +550,7 @@ class SettingsWindow:
             opts["relay_admin"] = {**opts["relay_admin"], key: out}
             hook.set("")
             bot.set("")
-            app.set_relay(key, opts["relay_share"], opts["relay_tab"])
+            app.set_relay(key, opts["relay_tab"])
             self.discord_code.set(guild_relay.key_label(key))  # the Guild page shows the new guild too
             top.clipboard_clear()
             top.clipboard_append(guild_relay.key_label(key))
@@ -606,7 +585,7 @@ class SettingsWindow:
             if app.relay and key in opts["relay_admin"]:
                 app.relay.close_guild()
                 opts["relay_admin"] = {k: v for k, v in opts["relay_admin"].items() if k != key}
-                app.set_relay("", False, False)
+                app.set_relay("", False)
                 self.discord_code.set("")
                 made.configure(text="Closed: members' apps stop sending to it.", fg=SOFT)
         if guild_relay.guild_key(opts["relay_code"]) in opts["relay_admin"]:

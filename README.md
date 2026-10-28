@@ -189,11 +189,12 @@ can `/bind` and `/unbind`. Guilds that would rather not use the shared bot can u
 setup* (Advanced) with a webhook and, optionally, their own bot.
 
 **Joining:** the pinned post or `/guildcode` in the guild's Discord, then *Settings → Guild ↔
-Discord*: enter the code, **Join**, and tick **Share my chat** and/or **Show a Guild tab**.
+Discord*: enter the code and **Join**: your guild chat now goes to the guild's Discord. Tick
+**Show a Guild tab** to see the channel in the app.
 
-**Typing in the Guild tab:** `/chatlink` in the guild's Discord gives a link that logs your app in
-as your Discord name (signed by the bot, so others see a ✓). Click the line at the bottom of the
-Guild tab, type, **Enter**.
+**Typing in the Guild tab:** click the line at the bottom of the Guild tab, type, **Enter**. It goes
+under your character's name, read from the game's status bar. Optionally, `/chatlink` in the
+guild's Discord adds your Discord name too (signed by the bot, so others see a ✓).
 
 **How it works:** the apps meet on a channel at two free public message brokers (MQTT, the kind
 smart-home devices use), named and encrypted from the guild code: only members can find or read
@@ -207,9 +208,8 @@ members sharing means fewer gaps, never more copies. The bot (or, in an own setu
 app) keeps the guild's details on the channel for new members and reads the Discord channel for
 everyone's Guild tab.
 
-**What is sent:** only the one kind of chat chosen, with the speaker's name and the game's time
-stamp: guild chat, or, to try it before the game has guild chat, map chat or whispers (posts say
-which). Never anything else, and nothing is ever typed into the game. Ask your guild first.
+**What is sent:** guild chat only, with the speaker's name and the game's time stamp. Never
+anything else, and nothing is ever typed into the game. Ask your guild first.
 
 > The game doesn't have guild chat yet. Until it does, CustomClassic Chat looks for it in old
 > MapleStory's guild purple, so it's picked up the day it shows up if the colour stayed the same.

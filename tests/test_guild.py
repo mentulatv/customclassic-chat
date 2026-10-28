@@ -24,7 +24,7 @@ class Net:
     def __init__(self):
         self.apps, self.posted = [], []
 
-    def app(self, reader, share=True, source="map", tab=False, admin=None):
+    def app(self, reader, share=True, source="guild", tab=False, admin=None):
         got = []
         peer = g.GuildPeer("ABCD-EFGH-JKLM", reader, got.append, share, tab, source, admin=admin,
                            cfg={"webhook": "https://discord.com/api/webhooks/1/x"}, connect=False,
@@ -39,7 +39,7 @@ class Net:
     now = 100.0
 
 
-def msg(text, kind="map", name="Rowan", stamp="18:49"):
+def msg(text, kind="guild", name="Rowan", stamp="18:49"):
     return {"kind": kind, "name": name, "body": text, "stamp": stamp}
 
 
@@ -51,7 +51,7 @@ def test_three_members_reading_one_message_post_it_once():
     c.send(msg("anyone up for zakum tonight?"), now=101)
     assert sum(p.decide(now=102) for p in net.apps) == 0  # still waiting for readings
     assert sum(p.decide(now=104) for p in net.apps) == 1  # one post, by one app
-    assert net.posted == [("Rowan · map", "anyone up for zakum tonight?")]  # the wording most saw
+    assert net.posted == [("Rowan · guild", "anyone up for zakum tonight?")]  # the wording most saw
     a.send(msg("anyone up for zakum tonight?"), now=110)  # read again later: already decided
     assert sum(p.decide(now=120) for p in net.apps) == 0
 
@@ -62,17 +62,19 @@ def test_the_lowest_id_among_those_who_saw_it_posts():
     a.send(msg("gl everyone"), now=100)
     for p in net.apps:
         p.decide(now=104)
-    assert net.posted == [("Rowan · map", "gl everyone")]
+    assert net.posted == [("Rowan · guild", "gl everyone")]
 
 
 def test_only_the_chosen_kind_is_ever_shared():
     net = Net()
     a, b = net.app("pc-aaa"), net.app("pc-bbb")
-    for kind in ("whisper", "buddy", "party", "guild", "mega", "system"):
-        a.send(msg("secret", kind=kind), now=100)  # sharing map chat: none of these go
+    for kind in ("map", "whisper", "buddy", "party", "mega", "system"):
+        a.send(msg("secret", kind=kind), now=100)  # only guild chat ever goes
     assert all(not p.matcher.pending for p in net.apps)
     net.app("pc-ccc", source="whisper").send(msg("test whisper", kind="whisper"), now=100)
-    assert b.matcher.pending  # whispers when (and only when) testing with whispers
+    assert not b.matcher.pending  # not even when asked to
+    a.send(msg("zakum at 8"), now=100)
+    assert b.matcher.pending
 
 
 def test_the_discord_tab_and_guildcode_through_the_admins_app():

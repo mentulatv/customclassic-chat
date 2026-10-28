@@ -45,16 +45,17 @@ def peers(cfg=None):
     return a, b, heard, said
 
 
-def test_typing_reaches_the_guild_signed():
+def test_typing_goes_under_the_character_and_the_discord_identity_is_opt_in():
     a, b, heard, said = peers()
-    assert "log in" in a.say_chat("hi")  # no login: nothing goes
+    assert "character" in a.say_chat("hi")  # no name read from the game yet, no Discord identity: nothing goes
     assert not heard
-    a.login = login()
+    a.game_name = "QuestGuy"  # read from the status bar
     assert a.say_chat("hi all @everyone") == ""
-    time.sleep(0.3)  # the post to Discord goes on its own thread
-    [(kind, msg)] = heard
-    assert (msg["kind"], msg["name"], msg["body"]) == ("guildsay", "Rowan ✓", "hi all @​everyone")
-    assert said == [("Rowan", "hi all @​everyone")]
+    a.login = login()  # the Discord identity added with /chatlink
+    assert a.say_chat("brb") == ""
+    time.sleep(0.3)  # the posts to Discord go on their own threads
+    assert [(m["name"], m["body"]) for _, m in heard] == [("QuestGuy", "hi all @​everyone"), ("QuestGuy - @Rowan ✓", "brb")]
+    assert sorted(said) == sorted([("QuestGuy", "hi all @​everyone"), ("QuestGuy - ＠Rowan", "brb")])
 
 
 def test_what_you_type_shows_once_for_you():

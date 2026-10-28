@@ -75,14 +75,12 @@ DEFAULTS = {
     "twitch_channel": "",     # which channel
     "twitch_in_all": False,   # its chat in All too
     "relay_code": "",         # opt in: the guild's code (guild chat to Discord peer to peer, the channel back)
-    "relay_share": False,     # share the guild chat this app reads with the guild's other apps
-    "relay_source": "guild",  # what's shared: "guild"; "map" or "whisper" only to test before the game has guild chat
     "relay_tab": False,       # the guild's Discord channel in the Guild tab
     "relay_reader": "",       # this install's random id among the guild's apps (no name)
     "relay_cfg": {},          # guild code -> the guild's details as last heard (its name and Discord webhook)
     "relay_admin": {},        # guild code -> guilds set up from here: name, webhook, and the Discord bot token if any
     "guild_login": "",        # this app's login from the bot's magic link (/chatlink): to type in the Guild tab
-    "game_name": "",          # your character's name, shown with your Discord name on what you type (if they differ)
+    "game_name": "",          # your character's name, as last read from the game's status bar: what you type goes under it
     "tab": "All",
     "settings_page": "Appearance",  # the settings section open last
     "menu_close_s": 10,       # the right-click menu closes after this many seconds (0: stays until clicked away)
@@ -992,6 +990,20 @@ def band_right(arr, centers, left: int, start: int, stop: int, backgrounds: dict
     return stop
 
 
+CHAR_NAME = re.compile(r"[A-Za-z0-9]{2,12}")  # MapleStory character names: letters and digits
+NAME_EVERY_S = 20  # how often the status bar is read for the character's name
+
+
+def character_name(read) -> str:
+    """The character's name from the status bar under the game's chat: the line right under
+    "LV. 20 Swordsman  HP[…]", e.g. QuestGuy. '' when it isn't there."""
+    status = next((ln for ln in read if re.match(r"(?i)\s*lv\b", ln.text)), None)
+    if status is None:
+        return ""
+    below = [ln for ln in read if ln.top > status.top and CHAR_NAME.fullmatch(ln.text.strip())]
+    return min(below, key=lambda ln: ln.top).text.strip() if below else ""
+
+
 def read_loop(app) -> None:
     """Reads the chat from pictures of the game window; finds the chat box when asked."""
     import reader as core
@@ -1000,6 +1012,7 @@ def read_loop(app) -> None:
     dedupe.seed(list(app.log.messages), time.time())  # what the game's chat still shows from before a restart
     capture, hwnd, last_error = None, None, ""
     last_check, tops, watch, lost = time.time(), deque(maxlen=6), CoverWatch(), 0
+    last_name, names = 0.0, deque(maxlen=3)  # the character's name: the same in the last reads wins
     while not app.stop.is_set():
         t0 = time.time()
         try:
@@ -1045,6 +1058,15 @@ def read_loop(app) -> None:
                             covered = watch.covered(stamped) or popup
                             if covered != app.covered:
                                 app.events.put(("covered", covered))
+                    if r and t0 - last_name > NAME_EVERY_S:  # who's playing: the status bar under the chat
+                        last_name = t0
+                        img = frame_image(frame, ox + r["left"], oy + r["top"] + r["height"],
+                                          ox + r["left"] + r["width"], oy + c["height"])
+                        name = character_name(reader.read(img)) if img else ""
+                        if name:
+                            names.append(name)
+                            if names.count(name) >= 2 and name != app.opts["game_name"]:
+                                app.events.put(("character", name))
                     if r and not app.want_fit and not app.msgs.edit and t0 - last_check > RECHECK_S:
                         # the game's chat resized? look at a band from well above it to just below it
                         last_check, line = t0, app.line
@@ -1483,11 +1505,13 @@ class ChatView:
             self.input.place_forget()
             return
         logged = guild_relay.check_login(self.opts["guild_login"]) if self.opts["guild_login"] else None
-        self.input.configure(font=self.font, state="normal" if logged else "disabled")
-        if not self.typing and not self.typed.get():
+        game = self.app.game_name()
+        me = guild_relay.who(game, logged["name"]) if logged and game else (logged["name"] if logged else game)
+        self.input.configure(font=self.font, state="normal" if me else "disabled")
+        if not self.typing and (not self.typed.get() or getattr(self, "placeholder", False)):
             self.input.configure(fg=SOFT)
-            self.typed.set(f"Message the guild as {logged['name']}… (click, type, Enter)" if logged else
-                           "To type here, log in: /chatlink in your guild's Discord")
+            self.typed.set(f"Message the guild as {me}… (click, type, Enter)" if me else
+                           "Your character's name is read from the game's status bar…")
             self.placeholder = True
         self.input.place(x=0, rely=1.0, anchor="sw", relwidth=1.0, width=-self.bar_px, height=self.input_height())
 
@@ -2216,6 +2240,11 @@ class ChatPanel(ChatView):
                     changed = True
                 elif kind == "settings":
                     self.open_settings()
+                elif kind == "character":  # the character's name, read from the status bar: who types
+                    self.opts["game_name"] = data
+                    save_settings(self.opts)
+                    if self.relay:
+                        self.relay.game_name = data
                 elif kind == "update":  # a newer version is out on GitHub
                     self.show_update(*data)
                 elif kind == "check_now":  # the tray menu: ask GitHub now, and say if it's up to date
@@ -2330,8 +2359,8 @@ class ChatPanel(ChatView):
         save_settings(self.opts)
 
     def game_name(self) -> str:
-        """Your character's name for what you type in the Guild tab: as set, or your first
-        character name from the Chat page."""
+        """Your character's name for what you type in the Guild tab: as read from the game's status
+        bar, or your first character name from the Chat page."""
         return self.opts["game_name"].strip() or next(iter(self.opts["ignore_names"]), "")
 
     def set_opt(self, key: str, value) -> None:
@@ -2410,24 +2439,22 @@ class ChatPanel(ChatView):
         return reader.GUILD_CONFIRMED or reader.Config.load().colors.get("guild") != reader.COLORS["guild"]
 
     def start_relay(self) -> None:
-        """Join the guild's channel set in Settings: when sharing, showing the Guild tab, or as
-        the guild's admin (whose app keeps the guild's details there and reads Discord for all)."""
+        """Join the guild's channel set in Settings (joined, the guild chat this app reads is shared
+        with the guild's other apps, and the Guild tab shows if ticked)."""
         if self.relay:
             self.relay.stop()
             self.relay = None
         o, code = self.opts, guild_relay.guild_key(self.opts["relay_code"])
         admin = o["relay_admin"].get(code) if code else None
-        if code and (o["relay_share"] or o["relay_tab"] or admin) and not self.demo:
-            self.relay = guild_relay.GuildPeer(code, o["relay_reader"], self.events.put, o["relay_share"],
-                                               o["relay_tab"], o["relay_source"], cfg=o["relay_cfg"].get(code),
+        if code and not self.demo:
+            self.relay = guild_relay.GuildPeer(code, o["relay_reader"], self.events.put, True,
+                                               o["relay_tab"], "guild", cfg=o["relay_cfg"].get(code),
                                                admin=admin, login=o["guild_login"])
             self.relay.game_name = self.game_name()
 
-    def set_relay(self, code: str, share: bool, tab: bool, source: str | None = None) -> None:
+    def set_relay(self, code: str, tab: bool) -> None:
         self.opts["relay_code"] = guild_relay.guild_key(code)
-        self.opts["relay_share"], self.opts["relay_tab"] = share, tab
-        if source in dict(guild_relay.SOURCES):
-            self.opts["relay_source"] = source
+        self.opts["relay_tab"] = tab
         save_settings(self.opts)
         self.start_relay()
         self.retab()

@@ -47,7 +47,7 @@ ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # no 0/O or 1/I: easy to read out
 CODE = re.compile(r"^[A-Z2-9]{12}$")
 WEBHOOK = re.compile(r"^https://(?:canary\.|ptb\.)?discord(?:app)?\.com/api/webhooks/(\d{5,25})/([\w-]{20,120})$")
 # what can be shared: guild chat, or, to test before the game has guild chat, map chat or whispers
-SOURCES = [("guild", "Guild chat"), ("map", "Map chat (for testing)"), ("whisper", "Whispers (for testing)")]
+SOURCES = [("guild", "Guild chat")]  # the only chat ever shared
 HOLD = 3.0  # seconds every app waits for the other members' readings of a message
 KEEP = 900  # seconds a posted message is remembered, so late readings of it are dropped
 SAME_TEXT, SAME_NAME = 88, 80  # how alike two readings must be (0-100) to be one message
@@ -108,8 +108,8 @@ def reader_id() -> str:
 
 
 def relay_line(msg: dict, source: str = "guild") -> dict | None:
-    """A message as it's shared, or None for anything that must not go: only the one chat type
-    chosen to share (guild chat; map chat or whispers when testing), with the game's stamp."""
+    """A message as it's shared, or None for anything that must not go: guild chat only, with the
+    game's stamp."""
     if source not in dict(SOURCES) or msg.get("kind") != source:
         return None
     if not msg.get("stamp") or not msg.get("name") or not msg.get("body"):
@@ -375,11 +375,18 @@ class GuildPeer:
         elif t == "hi":
             self.peers[str(msg.get("from"))] = {"at": now, "share": bool(msg.get("share")), "tab": bool(msg.get("tab"))}
         elif t == "say" and self.tab:  # a member typed in their Guild tab
-            claims = check_login(str(msg.get("login", "")), self.bot_key, now)
+            login = str(msg.get("login", ""))
+            claims = check_login(login, self.bot_key, now) if login else None
             server = self.cfg.get("server_id")
             ok = bool(claims) and (not server or str(claims.get("server")) == server)
-            name = who(str(msg.get("game", "")), str(claims["name"] if ok else msg.get("name", "?")))
-            self.put(("msg", {"kind": "guildsay", "name": name + (" ✓" if ok else " (unverified)"),
+            game = str(msg.get("game", ""))
+            if ok:  # with the Discord identity they added: checked against the bot's signature
+                name = who(game, str(claims["name"])) + " ✓"
+            elif login:  # a Discord identity that doesn't check out
+                name = who(game, str(msg.get("name", "?"))) + " (unverified)"
+            else:  # the character's name only
+                name = clean(game).strip()[:20] or "?"
+            self.put(("msg", {"kind": "guildsay", "name": name,
                               "body": clean(str(msg.get("text", ""))), "at": now, "time": time.strftime("%H:%M"),
                               "to": None, "fg": None, "bg": None}))
         elif t == "discord" and self.tab:
@@ -398,15 +405,18 @@ class GuildPeer:
     def say_chat(self, text: str) -> str:
         """Something typed in the Guild tab: to every member's Guild tab and the guild's Discord
         channel. Returns '' when it went, or why it couldn't."""
-        claims = check_login(self.login, self.bot_key)
-        if not claims:
-            return "log in first: type /chatlink in your guild's Discord"
+        claims = check_login(self.login, self.bot_key) if self.login else None
+        if not claims and not self.game_name:
+            return "your character's name isn't read yet: have the game's status bar in view"
         text = clean(text)[:400]
         if not text:
             return ""
-        self.say({"t": "say", "text": text, "login": self.login, "name": claims["name"], "game": self.game_name})
-        name = who(self.game_name, claims["name"])
-        self.put(("msg", {"kind": "guildsay", "name": name + " ✓", "body": text, "at": time.time(),
+        say = {"t": "say", "text": text, "game": self.game_name}
+        if claims:  # the Discord identity, added with /chatlink
+            say.update(login=self.login, name=claims["name"])
+        self.say(say)
+        name = who(self.game_name, claims["name"]) if claims else self.game_name
+        self.put(("msg", {"kind": "guildsay", "name": name + (" ✓" if claims else ""), "body": text, "at": time.time(),
                           "time": time.strftime("%H:%M"), "to": None, "fg": None, "bg": None}))
         if self.cfg.get("webhook"):
             threading.Thread(target=self._post_said, args=(name, text), daemon=True).start()

@@ -417,4 +417,4 @@ def test_guild_chat_switches_on_with_its_colour_alone():
     # buddy chat (and everything else) never goes, whatever is chosen to share
     buddy = {**m, "kind": "buddy"}
     assert all(guild_relay.relay_line(buddy, s) is None for s, _ in guild_relay.SOURCES)
-    assert guild_relay.relay_line({**m, "kind": "map"}, "map")["kind"] == "map"  # testing with map chat
+    assert guild_relay.relay_line({**m, "kind": "map"}, "map") is None  # guild chat is the only chat that goes
