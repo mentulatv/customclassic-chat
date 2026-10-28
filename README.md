@@ -90,8 +90,8 @@ python.exe to PATH"), download this repository, double-click **`setup.bat`** onc
 | | |
 |---|---|
 | **≡** (left end) | Opens the menu (the same as right-clicking the chat). |
-| Tabs | Click to switch. A red dot means unread messages; a gold dot on Watch means your watch list caught something. **Drag the tab row up or down** to make the chat taller or shorter from the top (the bottom stays). On the game's chat box, dragged all the way down it sits just under the game chat's top edge, so you can drag that edge to resize the game's chat itself: this chat follows. |
-| **◐** (right end) | See-through: the window 90% see-through and clicks going to the game underneath; a small ◐ stays clickable to turn it off again. |
+| **◐** (next to ≡) | See-through: the window 90% see-through and clicks going to the game underneath; a small ◐ stays clickable to turn it off again. |
+| Tabs | Click to switch. A red dot means unread messages; a gold dot on Watch means your watch list caught something. **Drag the tab row up or down** to make the chat taller or shorter from the top (the bottom stays). On the game's chat box, dragged all the way down it sits a little under the game chat's top edge, so you can drag that edge to resize the game's chat itself: this chat follows. |
 | **Corner grip** (right end) | Drag to resize: wider to the right, taller upward; the bottom-left corner stays. On extra windows and an unlocked panel: the chat on the game's chat box stays put. |
 | **⚠** (amber) | When the game's chat shows fewer than 3 lines (a long megaphone takes two; 4 or more is best) or is closed: an amber line says so across the top of every chat window, since megaphones arriving together could scroll away unread. With the game's chat closed, the chat on it shrinks to just that line. Make the game's chat taller (drag its top edge: the chat on it follows), or click the warning to put it away. |
 

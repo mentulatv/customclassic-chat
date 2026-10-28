@@ -585,9 +585,10 @@ def panel_rect(read: dict, extra: int, bar: int = 0) -> dict:
 
 
 def anchored(read: dict, line: float, bar: int = 0) -> dict:
-    """The panel on the game's chat: its lines, starting a little below their top, so the
-    game's own resize edge above them stays free to drag (the panel follows the new size)."""
-    a = max(3, round(line * 0.25))
+    """The panel on the game's chat: its lines, starting about half a line below their top, so
+    the game's own resize edge above them stays free and easy to grab (the panel follows the
+    new size)."""
+    a = max(6, round(line * 0.6))
     return {"left": read["left"], "top": read["top"] + a, "width": read["width"] + int(bar),
             "height": read["height"] - a}
 
@@ -1058,15 +1059,17 @@ def character_name(read) -> str:
 
 TRACK_EVERY_S = 0.15  # how often the game's scrollbar is looked at, to follow its chat's size
 RECHECK_SLOW_S = 30  # with its scrollbar in sight, how often text recognition checks the line size
+BAR_GRACE_S = 3  # the scrollbar out of sight that long (the chat closed?): text recognition looks again
+BAR_HIDDEN_S = 60  # gone for less than this, it's under something, most likely: its size stays meanwhile
 
 
 def scrollbar_span(frame, x0: int, x1: int, seed_y: int, lo: int, hi: int) -> tuple[int, int] | None:
     """The game's scrollbar beside its chat, from its pixels alone: the left edge of its track is
     one unbroken run of neutral grey (about 200 to 225) from the top arrow down to the bottom one,
-    thumb and all, and beside that run at both ends sit the blue arrow buttons; game scenery is
-    practically never like that. (top, bottom) of that run through seed_y in the columns x0..x1
-    (picture pixels, a BGRA picture), the longest; None when there's none (the chat closed, or
-    something over it)."""
+    thumb and all (blue where the pointer lights up an arrow button), and beside that run at both
+    ends sit the blue arrow buttons; game scenery is practically never like that. (top, bottom) of
+    that run through seed_y in the columns x0..x1 (picture pixels, a BGRA picture), the longest;
+    None when there's none (the chat closed, or something over it)."""
     import numpy as np
     seg = frame[lo:hi, x0:x1, :3].astype(np.int16)
     s = seed_y - lo
@@ -1076,9 +1079,10 @@ def scrollbar_span(frame, x0: int, x1: int, seed_y: int, lo: int, hi: int) -> tu
     grey = (mx - mn <= 6) & (mn >= 185) & (mx <= 240)
     wide = frame[lo:hi, x0:x1 + (x1 - x0) * 2, :3].astype(np.int16)  # and the button area beside it
     blue = (wide[:, :, 0] - wide[:, :, 2]) >= 60  # (blue minus red)
+    edge = grey | blue[:, :x1 - x0]  # a lit-up arrow button is blue right to its edge: the run goes on through it
     best = None
     for j in range(grey.shape[1]):
-        col = grey[:, j]
+        col = edge[:, j]
         if not col[s]:
             continue
         up = dn = s
@@ -1086,6 +1090,8 @@ def scrollbar_span(frame, x0: int, x1: int, seed_y: int, lo: int, hi: int) -> tu
             up -= 1
         while dn < len(col) - 1 and col[dn + 1]:
             dn += 1
+        if grey[up:dn + 1, j].sum() * 2 < dn - up + 1:  # mostly grey, or it's blue scenery
+            continue
         reach = max(4, (x1 - x0) * 2)  # about one arrow button, down from the top and up from the bottom
         arrows = blue[up:up + reach, j + 1:].any() and blue[max(up, dn - reach):dn + 1, j + 1:].any()
         if arrows and dn - up >= reach and (best is None or dn - up > best[1] - best[0]):
@@ -1093,41 +1099,88 @@ def scrollbar_span(frame, x0: int, x1: int, seed_y: int, lo: int, hi: int) -> tu
     return (best[0] + lo, best[1] + lo) if best else None
 
 
+def pointer_near(box: tuple[int, int, int, int]) -> bool:
+    """The mouse pointer on or close to a box on screen (left, top, right, bottom). The game draws
+    its own pointer, so it shows in pictures of the game: over the scrollbar it hides part of it
+    (the hand reaches about 30 pixels right of and below its tip)."""
+    import ctypes
+    import ctypes.wintypes as wt
+    pt = wt.POINT()
+    if not ctypes.windll.user32.GetCursorPos(ctypes.byref(pt)):
+        return False
+    left, top, right, bottom = box
+    return left - 34 <= pt.x <= right + 12 and top - 34 <= pt.y <= bottom + 12
+
+
+def dragging_on(box: tuple[int, int, int, int]) -> bool:
+    """A mouse button held down with the pointer above a box's bottom and within its width: the
+    game's chat being resized from its top edge, most likely (it's dragged up or down from there)."""
+    import ctypes
+    import ctypes.wintypes as wt
+    u32 = ctypes.windll.user32
+    if not (u32.GetAsyncKeyState(0x01) & 0x8000 or u32.GetAsyncKeyState(0x02) & 0x8000):
+        return False
+    pt = wt.POINT()
+    left, _, right, bottom = box
+    return bool(u32.GetCursorPos(ctypes.byref(pt))) and left <= pt.x <= right and pt.y <= bottom
+
+
+QUICK_S = 3  # after a drag on the game's chat, a new size seen in two pictures in a row is taken
+STEADY_LOOKS = 25  # otherwise it has to hold this many pictures (about 10 s): a tooltip passing over
+# an end of the scrollbar makes it look shorter for a moment, and that's no resize
+
+
 def track_loop(app) -> None:
-    """Follows the game's chat as it's resized, from its scrollbar's pixels a few times a second
-    (text recognition takes a second or more a look): a new top or bottom seen twice in a row
-    moves the chat's box at once. The scrollbar gone (the chat closed, say), the reading loop's
-    slower checks take over."""
-    last, error = None, ""
+    """Follows the game's chat as it's resized, from its scrollbar's pixels (text recognition
+    takes a second or more a look). Its size changes as its top edge is dragged: then the same
+    new top and bottom in two pictures in a row moves the chat's box. Without a drag, a new size
+    has to hold for seconds first, as something passing over the scrollbar looks like one.
+    Pictures with the mouse pointer over the scrollbar are passed over, as it hides part of it.
+    The scrollbar gone a while (the chat closed, say), the reading loop's slower checks take over."""
+    last, same, looked, quick, error = None, 0, None, 0.0, ""
     while not app.stop.wait(TRACK_EVERY_S):
         try:
             cap, game, r = app.capture, app.game, app.read_rect
+            now = time.time()
             if cap is None or not game or not r or app.want_fit or app.main.edit:
-                last = None
-                continue
-            frame = cap.latest()
-            if frame is None:
+                last, quick = None, now + QUICK_S  # (just fitted afresh: the scrollbar may set it right at once)
                 continue
             c, ox, oy, line, bar = game["client"], game["ox"], game["oy"], app.line, app.bar_px
             right, bottom = r["left"] + r["width"], r["top"] + r["height"]
+            if dragging_on((c["left"] + r["left"], 0, c["left"] + right + bar, c["top"] + bottom)):
+                quick = now + QUICK_S
+            frame = cap.latest()
+            if frame is None or frame is looked:  # a new picture comes every 400 ms or so: each counts once
+                continue
+            looked = frame
+            if pointer_near((c["left"] + right, c["top"] + r["top"], c["left"] + right + bar, c["top"] + bottom)):
+                if now - app.bar_at < BAR_GRACE_S:
+                    app.bar_at = now  # still there, most likely: only behind the pointer
+                if quick > now:
+                    quick = now + QUICK_S  # a drag let go of right there: still to be followed
+                last = None
+                continue
             span = scrollbar_span(frame, ox + right, ox + right + max(3, bar // 2) + 2, oy + int(bottom - line * 0.5),
                                   oy, oy + min(c["height"], int(bottom + line)))
-            app.bar_seen = span is not None
             if span is None:
                 last = None
                 continue
+            app.bar_at = now
             if app.chat_closed:  # it's open again
                 app.events.put(("chat_closed", False))
+                quick = now + QUICK_S
             pad = max(1, round(line * 0.12))  # the lines' box sits a hair outside the scrollbar's
             top, bot = span[0] - oy - pad, span[1] - oy + pad
             if abs(top - r["top"]) < 3 and abs(bot - bottom) < 3:
-                last = None
+                last, same = None, 0
             elif last == (top, bot):
-                box = {"left": r["left"], "top": top, "width": r["width"], "height": bot - top, "bar": bar}
-                app.events.put(("fit", to_relative(box, line, c)))
-                last = None
+                same += 1
+                if same >= (1 if now < quick else STEADY_LOOKS):
+                    box = {"left": r["left"], "top": top, "width": r["width"], "height": bot - top, "bar": bar}
+                    app.events.put(("fit", to_relative(box, line, c)))
+                    last, same = None, 0
             else:
-                last = (top, bot)
+                last, same = (top, bot), 0
         except Exception as e:
             if str(e) != error:
                 error = str(e)
@@ -1144,6 +1197,7 @@ def read_loop(app) -> None:
     last_check, tops, watch, lost = time.time(), deque(maxlen=6), CoverWatch(), 0
     last_name, names = 0.0, deque(maxlen=3)  # the character's name: the same in the last reads wins
     shorts = deque(maxlen=2)  # a short chat's line count, as counted in the last looks
+    odd = 0  # looks in a row with the lines another size than the chat's
     while not app.stop.is_set():
         t0 = time.time()
         try:
@@ -1200,7 +1254,7 @@ def read_loop(app) -> None:
                             names.append(name)
                             if names.count(name) >= 2 and name != app.opts["game_name"]:
                                 app.events.put(("character", name))
-                    seen = app.bar_seen  # its scrollbar in sight: its size is followed from that (track_loop)
+                    seen = t0 - app.bar_at < BAR_GRACE_S  # its scrollbar in sight: its size is followed from that (track_loop)
                     if r and not app.want_fit and not app.main.edit and \
                             t0 - last_check > (RECHECK_SLOW_S if seen else RECHECK_S):
                         # the game's chat resized, or its line size changed? look at a band from well
@@ -1213,9 +1267,12 @@ def read_loop(app) -> None:
                         found = find_lines(img, reader) if img else None
                     if r and not app.want_fit and not app.main.edit and seen and last_check == t0:
                         # with the scrollbar in sight, only the line size is checked here (the UI Size
-                        # changed?): the chat's size the scrollbar tells
-                        if found and abs(found[1] - app.line) > app.line * 0.2:
-                            app.want_fit = True
+                        # changed?): the chat's size the scrollbar tells. Off twice in a row, as a busy
+                        # chat (megaphones, wrapped lines) can throw one look off
+                        if found:
+                            odd = odd + 1 if abs(found[1] - app.line) > app.line * 0.2 else 0
+                        if odd >= 2:
+                            app.want_fit, odd = True, 0
                     elif r and not app.want_fit and not app.main.edit and last_check == t0:
                         # closed completely? its newest line shows in the typing bar under it
                         bar = frame_image(frame, ox + r["left"], oy + r["top"] + r["height"],
@@ -1223,7 +1280,10 @@ def read_loop(app) -> None:
                         closed = not found and bool(bar) and chat_closed(reader.read(bar))
                         if closed != app.chat_closed:
                             app.events.put(("chat_closed", closed))
-                        if not found and not closed and img:  # one or two lines: find_lines can't tell
+                        hidden = not closed and t0 - app.bar_at < BAR_HIDDEN_S
+                        if hidden:  # its scrollbar there a moment ago: something's over it (a tooltip, a
+                            found = None  # window), most likely; its size stays as the scrollbar told
+                        if not found and not closed and img and not hidden:  # one or two lines: find_lines can't tell
                             n = short_chat(reader.read(img), r["top"] + r["height"] - y0, r["left"] - x0,
                                            r["left"] - x0 + r["width"] * 0.6, line)
                             # only a chat too short for find_lines, and the same count twice in a row:
@@ -1235,7 +1295,7 @@ def read_loop(app) -> None:
                                           "width": r["width"], "height": h}, app.line)
                         elif found:
                             shorts.clear()
-                        lost = 0 if found or closed else lost + 1
+                        lost = 0 if found or closed or hidden else lost + 1
                         if found and abs(found[1] - app.line) > app.line * 0.2:
                             app.want_fit = True  # the game's UI Size changed: the lines are another size, fit afresh
                         elif found:
@@ -1353,26 +1413,26 @@ class OverlayPane:
         return self.y0 + self.h - (0 if self.last else ChatFrame.DIV)
 
     def buttons(self, width: int) -> list[tuple[str, int, int]]:
-        """On the top pane's first row, right to left before the corner grip: ◐, and the ⚠ when
-        there is one."""
+        """On the top pane's first row, left to right after the ≡: ◐, and the ⚠ when there is one
+        (at the left end, well away from the game chat's resize edge and the corner grip)."""
         if not self.first:
             return []
         f = self.frame
-        s = strip_height(self.app.line) - 4
-        x = width - s - 4 - (f.corner_px() + 4 if f.can_resize() else 0)
+        rh = strip_height(self.app.line)
+        s, x = rh - 4, rh + 4
         out = []
         for name in ["see"] + (["warn"] if f.warning() else []):
             out.append((name, x, x + s))
-            x -= s + 4
+            x += s + 4
         return out
 
     def tab_spans(self, width: int) -> list[tuple[str, int, int, int]]:
-        """The tabs as (name, x0, x1, row): the first row after the ≡ and before the buttons, and
-        when the pane is too narrow for them all, the rest on more rows under it."""
+        """The tabs as (name, x0, x1, row): the first row after the ≡ and the buttons, and before
+        the corner grip, and when the pane is too narrow for them all, the rest on more rows under it."""
         rh, pad = strip_height(self.app.line), 10
-        buttons = self.buttons(width)
-        first_end = (min(x0 for _, x0, _ in buttons) if buttons else width) - 4
-        x, row, out = rh + 6, 0, []  # after the ≡
+        buttons, f = self.buttons(width), self.frame
+        first_end = width - 4 - (f.corner_px() + 4 if self.first and f.can_resize() else 0)
+        x, row, out = (max(x1 for *_, x1 in buttons) + 6 if buttons else rh + 6), 0, []  # after the ≡ and buttons
         for name, _ in self.log.tabs:
             w = self.app.tab_font.measure(name) + 2 * pad
             end = first_end if row == 0 else width - 4
@@ -1403,7 +1463,7 @@ class OverlayPane:
             return
         app, f, w = self.app, self.frame, self.frame.width
         rh, sh, y0 = strip_height(app.line), self.strip_h(), self.y0
-        # the tab row(s): the ≡ for the menu, the tabs, and on the top pane ◐, ⚠ and the corner grip
+        # the tab row(s): the ≡ for the menu, on the top pane ◐ and ⚠, the tabs, and the corner grip
         bc.create_rectangle(0, y0, w, y0 + sh, fill=STRIP, outline="")
         g = rh - 4
         bc.create_rectangle(4, y0 + 2, 4 + g, y0 + rh - 2, fill=TAB, outline="")
@@ -2135,14 +2195,23 @@ class ChatPane:
         self.text = tk.Text(body, bg=app.opts["panel_bg"] or PANEL, fg=INK, wrap="word", relief="flat", padx=8,
                             pady=6, cursor="arrow", yscrollcommand=scroll.set, highlightthickness=0, height=4)
         self.text.pack(side="left", fill="both", expand=True)
-        scroll.configure(command=self.text.yview)
+        scroll.configure(command=lambda *a: (self.text.yview(*a), self.scrolled()))
+        for event in ("<MouseWheel>", "<KeyRelease>", "<ButtonRelease-1>"):  # (the text's own scrolling)
+            self.text.bind(event, lambda e: self.text.after_idle(self.scrolled), add="+")
+        self.text.bind("<Configure>", lambda e: self.reading or self.text.see("end"))  # laid out, or resized
         for w in (self.text, self.bar):
             w.bind("<Button-3>", lambda e: win.menu(e, self))
         self.drawn = None
+        self.reading = False  # scrolled up to read back: new messages keep the view where it is
+
+    def scrolled(self) -> None:
+        """Scrolled by hand: reading back unless at the newest messages again."""
+        self.reading = self.text.yview()[1] < 0.999
 
     def pick(self, name: str) -> None:
         self.log.select(name)
         self.conf["tab"] = name
+        self.reading = False
         save_settings(self.win.app.opts)
         self.render()
 
@@ -2180,7 +2249,8 @@ class ChatPane:
             self.drawn = (tuple(tabs), self.log.tab)
             self.flow()
         t = self.text
-        at_end = t.yview()[1] >= 0.999
+        lines = lambda index: int(t.index(index).split(".")[0])  # (one line a message)
+        from_end = lines("end-1c") - lines("@0,0") if self.reading else None  # the line read, from the newest
         t.configure(state="normal", font=app.font, bg=app.opts["panel_bg"] or PANEL)
         t.delete("1.0", "end")
         for m in self.log.visible()[-NormalChat.MAX_SHOWN:]:
@@ -2190,8 +2260,10 @@ class ChatPane:
             star = "★ " if m.get("watch") and self.log.tab != "Watch" else ""
             t.insert("end", star + line_text(m, app.opts["timestamps"]) + "\n", tag)
         t.configure(state="disabled")
-        if at_end:
+        if from_end is None:  # the newest messages in view, as a chat does
             t.see("end")
+        else:
+            t.yview(f"{max(1, lines('end-1c') - from_end)}.0")
 
 
 class NormalChat:
@@ -2334,7 +2406,7 @@ class ChatPanel:
         self.capture = None        # the game window's pictures, shared by the reading and tracking threads
         self.read_rect = None      # the chat lines in the game's client coordinates
         self.want_fit = not opts["box"]
-        self.bar_seen = False      # the game's scrollbar found beside its chat, last look (then it's tracked by its pixels)
+        self.bar_at = 0.0          # when the game's scrollbar was last seen beside its chat (it's followed by its pixels)
         self.user_hidden = False
         self.line = (opts["box"] or {}).get("line") or 24.0
         self.frames, self.normal = [], []

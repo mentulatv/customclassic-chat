@@ -425,8 +425,14 @@ def test_the_game_scrollbar_is_found_from_its_pixels():
     frame[44:52, 13:20, :3] = (153, 102, 34)    # the blue arrow buttons beside it, top and bottom
     frame[139:147, 13:20, :3] = (153, 102, 34)
     assert mc.scrollbar_span(frame, 6, 16, 140, 0, 200) == (41, 149)
+    lit = frame.copy()
+    lit[44:52, 10, :3] = (151, 85, 47)  # the pointer on the top arrow lights it up, blue to its edge: the same span
+    assert mc.scrollbar_span(lit, 6, 16, 140, 0, 200) == (41, 149)
     frame[60:80, 9:22, :3] = (40, 120, 200)  # a window over its upper part: no top arrow beside the run any more
     assert mc.scrollbar_span(frame, 6, 16, 140, 0, 200) is None
+    sky = np.zeros((200, 40, 4), np.uint8)
+    sky[:, :, :3] = (230, 160, 90)  # the chat closed, blue sky where its scrollbar was: none
+    assert mc.scrollbar_span(sky, 6, 16, 140, 0, 200) is None
 
 
 
@@ -461,7 +467,7 @@ def test_a_short_or_closed_game_chat_is_noticed():
     # closed: the newest line shows in the typing bar, where an open chat has its button
     assert mc.chat_closed([SimpleNamespace(text="Y0ungL1nk: S> Devil horns")])
     assert not mc.chat_closed([SimpleNamespace(text="日")]) and not mc.chat_closed([SimpleNamespace(text="All")])
-    # the panel starts a little below the game chat's top, so its resize edge stays free
+    # the panel starts about half a line below the game chat's top, so its resize edge stays free
     r = mc.anchored({"left": 100, "top": 500, "width": 400, "height": 160}, 16, 18)
-    assert r["top"] > 500 and r["top"] + r["height"] == 660 and r["width"] == 418
+    assert 506 <= r["top"] <= 512 and r["top"] + r["height"] == 660 and r["width"] == 418
 
