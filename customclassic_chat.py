@@ -86,6 +86,7 @@ DEFAULTS = {
     "tab": "All",
     "settings_page": "Appearance",  # the settings section open last
     "menu_close_s": 10,       # the right-click menu closes after this many seconds (0: stays until clicked away)
+    "update_check": True,     # ask GitHub now and then whether a newer version is out, and say so
     "box": None,              # the chat lines relative to the game window: dx, dy (from its bottom), w, h, line, cw, ch
     "extra": 0,               # pixels the panel reaches above the game's chat (dragged with the ≡ grip)
     "unlocked": False,        # placed anywhere you like instead of on the game's chat (it still reads the game's chat)
@@ -121,6 +122,7 @@ def chat_menu_open(read) -> bool:
 
 PANEL, STRIP, TAB, TAB_ON, INK, SOFT, DOT = "#111827", "#0b1120", "#1c2740", "#2f5597", "#eef3fb", "#8f9db5", "#ff4b4b"
 WARN = "#ffc24b"
+SOFT_INK = "#c8d2e4"  # the second line of a note
 SHADOW = "#000000"  # behind solid text (pure black: the see-through colour is a near-black of its own)
 
 
@@ -868,6 +870,7 @@ def start_tray(app):
         pystray.MenuItem("New chat window", send("window", None)),
         pystray.MenuItem("See-through", send("see_through", None), checked=lambda item: app.opts["see_through"]),
         pystray.MenuItem("Settings…", send("settings", None)),
+        pystray.MenuItem("Check for updates", send("check_now", None)),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem("Quit", send("hotkey", HK_QUIT)),
     )
@@ -1835,8 +1838,10 @@ class ChatPanel(ChatView):
             save_settings(opts)
         self.relay = None
         self.start_relay()
+        self.update_note = None
         if not demo:
             threading.Thread(target=login_listener, args=(self.events,), daemon=True).start()
+            self.root.after(15000, self.check_updates)
         threading.Thread(target=overlay.hotkey_thread, args=(self.events, HOTKEYS), daemon=True).start()
         threading.Thread(target=demo_loop if demo else read_loop, args=(self,), daemon=True).start()
         self.tray = start_tray(self)
@@ -1908,6 +1913,67 @@ class ChatPanel(ChatView):
                 self.render()
         c.bind("<ButtonPress-1>", lambda e: close(open_tab=True))
         t.root.after(12000, lambda: t.root.winfo_exists() and close())
+
+    UPDATE_EVERY_MS = 12 * 3600 * 1000
+
+    def check_updates(self, again: bool = True, tell: bool = False) -> None:
+        """Ask GitHub, on a thread, whether a newer version is out (at start, then twice a day while
+        the setting is on). tell: say so even when this one is the newest (asked from the tray)."""
+        import updates
+        if tell or self.opts["update_check"]:
+            def ask():
+                found = []
+                updates.check(found.append)
+                if found:
+                    self.events.put(found[0])
+                elif tell:
+                    self.events.put(("status", f"CustomClassic Chat {updates.VERSION} is the newest version."))
+            threading.Thread(target=ask, daemon=True).start()
+        if again:
+            self.root.after(self.UPDATE_EVERY_MS, self.check_updates)
+
+    def show_update(self, version: str, page: str) -> None:
+        """A note above the panel until it's answered: the version here and the new one, a link to
+        download it from GitHub, and Later (until the app starts again)."""
+        import updates
+        import webbrowser
+        if self.update_note is not None and self.update_note.root.winfo_exists():
+            return
+        p = self.stack_now()
+        w = max(300, min(460, p["width"] - 20))
+        t = self.update_note = self.overlay.Overlay("CustomClassic Chat update", p["left"] + 10, 0, w, 10,
+                                                    master=self.root, click_through=False)
+        c = t.canvas
+        c.configure(bg="#10213f")
+        head = c.create_text(10, 8, anchor="nw", text="An update is available", fill=INK, font=self.hint_font,
+                             width=w - 20)
+        y = c.bbox(head)[3] + 4
+        body = c.create_text(10, y, anchor="nw", fill=SOFT_INK, font=self.font, width=w - 20,
+                             text=f"Your version {updates.VERSION}  ·  new version {version}")
+        y = c.bbox(body)[3] + 10
+        buttons = []
+        x = 10
+        for text, fill in (("Download", ADJUST), ("Later", "#2a3654")):
+            label = c.create_text(x + 12, y + 5, anchor="nw", text=text, fill=INK, font=self.tab_font)
+            x0, y0, x1, y1 = c.bbox(label)
+            box = c.create_rectangle(x0 - 12, y0 - 5, x1 + 12, y1 + 5, fill=fill, outline="")
+            c.tag_raise(label, box)
+            buttons.append((text, (x0 - 12, y0 - 5, x1 + 12, y1 + 5)))
+            x = x1 + 24
+        h = buttons[0][1][3] + 10
+        c.create_rectangle(0, 0, w - 1, h - 1, outline=ADJUST_EDGE)
+        t.place(p["left"] + 10, max(0, p["top"] - h - 8), w, h)
+        t.show(True)
+
+        def click(e):
+            for text, (x0, y0, x1, y1) in buttons:
+                if x0 <= e.x <= x1 and y0 <= e.y <= y1:
+                    if text == "Download":
+                        webbrowser.open(page)
+                    if self.update_note is t:
+                        self.update_note = None
+                    t.root.destroy()
+        c.bind("<ButtonPress-1>", click)
 
     @property
     def bar_px(self) -> int:
@@ -2150,6 +2216,10 @@ class ChatPanel(ChatView):
                     changed = True
                 elif kind == "settings":
                     self.open_settings()
+                elif kind == "update":  # a newer version is out on GitHub
+                    self.show_update(*data)
+                elif kind == "check_now":  # the tray menu: ask GitHub now, and say if it's up to date
+                    self.check_updates(again=False, tell=True)
                 elif kind == "login":  # the magic link: this app is logged in as its Discord name
                     self.opts["guild_login"] = data
                     save_settings(self.opts)

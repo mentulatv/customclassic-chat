@@ -135,6 +135,13 @@ class SettingsWindow:
         done.pack(side="bottom", fill="x", padx=18, pady=18)
         label(side, "Changes apply right away.", soft=True, size=8, bg=SIDE, wrap=150).pack(side="bottom", padx=18,
                                                                                             fill="x")
+        import updates
+        check_updates = tk.BooleanVar(value=self.opts["update_check"])
+        tick = check(side, "Check for updates", check_updates,
+                     lambda: app.set_opt("update_check", check_updates.get()))
+        tick.configure(bg=SIDE, activebackground=SIDE, font=(UI, 8), fg=SOFT)
+        tick.pack(side="bottom", fill="x", padx=16)
+        label(side, f"Version {updates.VERSION}", soft=True, size=8, bg=SIDE).pack(side="bottom", padx=18, fill="x")
 
         self.content = tk.Frame(top, bg=BG, padx=24, pady=20, width=560, height=600)
         self.content.pack(side="left", fill="both", expand=True)

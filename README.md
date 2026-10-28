@@ -65,6 +65,12 @@ Want to look around first? **`CustomClassic Chat demo.bat`** shows made-up messa
 anything. To update, unzip a newer version over the old folder: your settings and chat history
 (`chat.json`, `chat_history.jsonl`) stay.
 
+**Updates:** CustomClassic Chat asks GitHub at start and twice a day which version is the
+latest, and when there's a newer one a note says so ("Your version 1.4.0 · new version 1.5.0")
+with **Download**, which opens the release page here. It never downloads or installs anything
+by itself. The tray menu's **Check for updates** asks right away; untick **Check for updates**
+at the bottom of the settings sidebar to stop it asking.
+
 **Game settings:** any resolution and **UI Size** work; **1280×720 or larger** is recommended,
 since smaller windows make the chat text tiny to read. Run the game **windowed**: an overlay
 can't draw over a fullscreen game, so in the "(Full Screen)" resolutions the panel may not show.
