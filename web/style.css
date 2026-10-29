@@ -41,6 +41,13 @@ a { color: var(--accent-hi); }
 .list { flex: 1; overflow-y: auto; padding: 4px 8px; font-size: var(--text); min-height: 0; }
 .msg { white-space: pre-wrap; word-break: break-word; padding: 0 3px;
   text-shadow: 0 1px 1px #000; }
+.say { margin: 4px 6px 6px; padding: 5px 8px; background: var(--bg); color: var(--ink); border: 1px solid var(--line);
+  border-radius: 6px; font: inherit; font-size: var(--text); }
+.say:focus { outline: none; border-color: var(--accent); }
+.card input[type=text] { flex: 1; min-width: 0; padding: 5px 8px; background: var(--bg); color: var(--ink);
+  border: 1px solid var(--line); border-radius: 6px; font: inherit; }
+.card .note { color: var(--soft); font-size: 12px; margin: 2px 0 6px; }
+.card h3 { font-size: 13px; margin: 14px 0 4px; }
 .divider { height: 6px; cursor: row-resize; background: var(--line); flex: none; }
 dialog { background: var(--card); color: var(--ink); border: 1px solid var(--line); border-radius: 10px; max-width: 96vw; }
 dialog canvas { display: block; max-width: 100%; cursor: crosshair; border: 1px solid var(--line); }

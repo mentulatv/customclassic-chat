@@ -27,6 +27,23 @@
     <label>Text size <input id="fontSize" type="range" min="11" max="22"> <span id="fontSizeOut"></span></label>
     <label><input id="timestamps" type="checkbox"> Time stamps</label>
     <button id="region">Find the chat box by itself again</button>
+
+    <h3>Twitch</h3>
+    <label><input id="twitch" type="text" placeholder="Channel name or twitch.tv link"> <button id="twitchUse">Use</button></label>
+    <label><input id="twitchInAll" type="checkbox"> Show it in All too</label>
+    <p class="note">Read as a guest: no account or login.</p>
+
+    <h3>Guild ↔ Discord</h3>
+    <label><input id="guild" type="text" placeholder="Guild code (ABCD-EFGH-JKLM)"> <button id="guildJoin">Join</button></label>
+    <p class="note" id="guildNote">Type <b>/guildcode</b> in your guild's Discord channel for the code.</p>
+    <label><input id="guildShare" type="checkbox"> Share the guild chat I read</label>
+    <label>Character name <input id="gameName" type="text" placeholder="The name you play as"></label>
+    <label>Discord name <input id="login" type="text" placeholder="Paste the link /chatlink gives you (optional)"></label>
+    <p class="note" id="loginNote"></p>
+
+    <h3>Keep your setup</h3>
+    <p class="note">It's saved in this browser. To use it in another browser, copy it there:</p>
+    <label><button id="copySetup">Copy my setup</button> <input id="setup" type="text" placeholder="…or paste a copied setup here"> <button id="restore">Restore</button></label>
   </section>
 
   <p class="small">Nothing leaves your computer: the game's picture is read in this browser and never sent
@@ -34,12 +51,52 @@
     chat? Get the <a href="https://github.com/mentulatv/customclassic-chat">Windows app</a>.</p>
 </main>
 <script type="module">
-import { settings, saveSettings, onSettings } from "./js/settings.js";
+import { settings, saveSettings, onSettings, exportSetup, importSetup } from "./js/settings.js";
+import { guildCode, loginFrom, checkLogin } from "./js/guild.js";
+import { channelName } from "./js/twitch.js";
 const $ = s => document.querySelector(s);
-const show = () => {
+const show = async () => {
   $("#fontSize").value = settings.fontSize; $("#fontSizeOut").textContent = settings.fontSize + " px";
   $("#timestamps").checked = settings.timestamps;
+  if (document.activeElement !== $("#twitch")) $("#twitch").value = settings.twitchChannel;
+  $("#twitchInAll").checked = settings.twitchInAll;
+  if (document.activeElement !== $("#guild")) $("#guild").value = settings.guildCode;
+  $("#guildJoin").textContent = settings.guildCode ? "Leave" : "Join";
+  $("#guildNote").innerHTML = settings.guildCode
+    ? `Joined${settings.guildCfg?.name ? ` <b>${settings.guildCfg.name.replace(/</g, "&lt;")}</b>` : ""}: the Guild tab shows its Discord channel.`
+    : "Type <b>/guildcode</b> in your guild's Discord channel for the code.";
+  $("#guildShare").checked = settings.guildShare !== false;
+  if (document.activeElement !== $("#gameName")) $("#gameName").value = settings.gameName;
+  const claims = settings.login ? await checkLogin(settings.login) : null;
+  $("#login").value = "";
+  $("#login").placeholder = claims ? `${claims.name}: added (paste a new link to change it)` : "Paste the link /chatlink gives you (optional)";
+  $("#loginNote").textContent = settings.login && !claims ? "That Discord link has run out: /chatlink again." : "";
 };
+// a /chatlink link opened on this site: ccc.mentula.tv/#login=…
+const fromLink = loginFrom(location.hash);
+if (fromLink) { saveSettings({ login: fromLink }); history.replaceState(null, "", location.pathname); }
+$("#twitchUse").onclick = () => saveSettings({ twitchChannel: channelName($("#twitch").value) }) || show();
+$("#twitchInAll").onchange = e => saveSettings({ twitchInAll: e.target.checked });
+$("#guildJoin").onclick = () => {
+  if (settings.guildCode) { saveSettings({ guildCode: "", guildCfg: null }); return show(); }
+  const code = guildCode($("#guild").value);
+  if (!code) { $("#guildNote").textContent = "That isn't a guild code: it looks like ABCD-EFGH-JKLM."; return; }
+  saveSettings({ guildCode: code }); show();
+};
+$("#guildShare").onchange = e => saveSettings({ guildShare: e.target.checked });
+$("#gameName").onchange = e => saveSettings({ gameName: e.target.value.trim().slice(0, 20) });
+$("#login").onchange = async e => {
+  const token = loginFrom(e.target.value);
+  if (token && await checkLogin(token)) saveSettings({ login: token });
+  else $("#loginNote").textContent = "That isn't a working /chatlink link.";
+  show();
+};
+$("#copySetup").onclick = async () => {
+  const text = exportSetup();
+  try { await navigator.clipboard.writeText(text); $("#copySetup").textContent = "Copied"; }
+  catch { $("#setup").value = text; $("#setup").select(); }
+};
+$("#restore").onclick = () => { $("#restore").textContent = importSetup($("#setup").value) ? "Restored" : "That isn't a copied setup"; show(); };
 $("#fontSize").oninput = e => { saveSettings({ fontSize: +e.target.value }); show(); };
 $("#timestamps").onchange = e => saveSettings({ timestamps: e.target.checked });
 $("#region").onclick = () => { saveSettings({ region: null, autoFind: true }); $("#region").textContent = "Done: the chat window looks for it"; };

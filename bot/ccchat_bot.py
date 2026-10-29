@@ -138,6 +138,14 @@ def login_link(key, user_id: str, name: str, server_id: str, now: float | None =
     return f"http://127.0.0.1:{gr.LOGIN_PORT}/login?t={token}"
 
 
+WEBSITE = "https://ccc.mentula.tv"
+
+
+def web_login_link(link: str) -> str:
+    """The same login for the website: after the # it stays in the browser, never sent to a server."""
+    return f"{WEBSITE}/#login={link.split('t=', 1)[1]}"
+
+
 class Channels:
     """Publishing, sealed, on guilds' encrypted channels: one connection to each broker for all."""
 
@@ -359,8 +367,9 @@ def make_bot(store: Store, channels: Channels, key=None):
             return
         link = login_link(key, str(interaction.user.id), interaction.user.display_name, str(interaction.guild_id))
         await interaction.response.send_message(
-            f"With CustomClassic Chat running on this PC, open this link to log it in as **{interaction.user.display_name}** "
-            f"(for {LOGIN_DAYS} days): {link}\nIt's yours alone: don't share it.", ephemeral=True)
+            f"Log CustomClassic Chat in as **{interaction.user.display_name}** (for {LOGIN_DAYS} days):\n"
+            f"• The Windows app (running on this PC): {link}\n"
+            f"• The website: {web_login_link(link)}\nThey're yours alone: don't share them.", ephemeral=True)
 
     @client.event
     async def on_message(message):

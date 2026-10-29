@@ -32,6 +32,8 @@ def test_only_the_bots_own_logins_count():
     assert g.check_login(forged + "." + sig, PUBLIC) is None  # the name changed after signing
     assert g.check_login("junk", PUBLIC) is None and g.check_login(login(), "") is None
     link = bot.login_link(KEY, "1", "Rowan", "555")
+    web = bot.web_login_link(link)  # the same login, for the website, after the #
+    assert web.startswith("https://ccc.mentula.tv/#login=") and web.split("=", 1)[1] == link.split("t=", 1)[1]
     assert link.startswith("http://127.0.0.1:47321/login?t=") and g.check_login(link.split("t=")[1], PUBLIC)
 
 

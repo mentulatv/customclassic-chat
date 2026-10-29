@@ -165,6 +165,7 @@ export async function recognise(source, x, y, w, h) {
 const TEXT = {
   mega: [[9, 69, 76], [70, 39, 6], [119, 0, 66]],
   buddy: [[255, 153, 0]], whisper: [[0, 255, 0]], system: [[255, 175, 175], [255, 255, 0]],
+  guild: [[200, 180, 255]],  // a stand-in (old MapleStory's guild purple) until the game has guild chat
   map: [[255, 255, 255]],
 };
 const BANDS = { mega: [[83, 208, 190], [224, 173, 1], [206, 155, 177]], notice: [[151, 66, 57]] };

@@ -2,12 +2,18 @@
 // in tabs, split into panes. Everything stays in this browser.
 import * as R from "./reader.js";
 import { settings, saveSettings, onSettings } from "./settings.js";
+import { GuildPeer, guildCode } from "./guild.js";
+import { twitchChat, channelName } from "./twitch.js";
 
 const TABS = {
-  All: new Set(["map", "whisper", "party", "buddy", "other", "system"]),
-  Whisper: new Set(["whisper"]), Buddy: new Set(["buddy"]), Mega: new Set(["mega"]), Map: new Set(["map"]),
+  All: new Set(["map", "whisper", "party", "buddy", "guild", "other", "system"]),
+  Whisper: new Set(["whisper"]), Buddy: new Set(["buddy", "guild"]), Mega: new Set(["mega"]), Map: new Set(["map"]),
+  Guild: new Set(["guild", "guildsay", "discord"]), Twitch: new Set(["twitch"]),
 };
-const COLOURS = { map: "#ffffff", whisper: "#00ff00", buddy: "#ff9900", mega: "#f2a7cf", system: "#ffafaf", other: "#c8d2e4" };
+const kindsOf = tab => tab === "All" && settings.twitchInAll ? new Set([...TABS.All, "twitch"]) : TABS[tab];
+const tabsShown = () => Object.keys(TABS).filter(t => (t !== "Guild" || settings.guildCode) && (t !== "Twitch" || settings.twitchChannel));
+const COLOURS = { map: "#ffffff", whisper: "#00ff00", buddy: "#ff9900", mega: "#f2a7cf", system: "#ffafaf", other: "#c8d2e4",
+  guild: "#c8b4ff", guildsay: "#9fe3b8", discord: "#8ea1f0", twitch: "#bf94ff" };
 const $ = s => document.querySelector(s);
 const video = document.createElement("video");
 video.muted = true; video.playsInline = true;
@@ -210,14 +216,51 @@ function take(lines) {
     if (!p || !dedupe.isNew(ln.text)) continue;
     const body = ["map", "mega", "other"].includes(kind) ? R.unpadded(p.body) : p.body;
     const msg = { kind: p.sep === "<<" || p.sep === ">>" || p.sep === "«" || p.sep === "»" ? "whisper" : kind,
-      name: p.name, body, sent: p.sep === "<<" || p.sep === "«", at: Date.now(), raw: ln.text,
+      name: p.name, body, sent: p.sep === "<<" || p.sep === "«", at: Date.now(), raw: ln.text, stamp: p.stamp,
       fg: kind === "mega" || kind === "system" ? rgb(ln.colours.text) : null, bg: kind === "mega" && ln.band ? rgb(ln.bg) : null };
     log.push(msg);
+    if (msg.kind === "guild") guild?.send(msg);  // guild chat only: shared with the guild, if joined
     added++;
   }
   if (added) { keepLog(); render(); }
 }
 const rgb = c => c ? `rgb(${c.join(",")})` : null;
+
+// a message from Twitch or the guild's channel
+let pending = false, draft = "";
+function addMsg(msg) {
+  log.push(msg);
+  if (pending) return;
+  pending = true;
+  requestAnimationFrame(() => { pending = false; keepLog(); render(); });
+}
+
+// ---------------------------------------------------------------- Twitch and the guild
+
+let twitch = null, guild = null, extrasKey = "";
+
+function startExtras() {
+  const key = JSON.stringify([settings.twitchChannel, settings.guildCode, settings.guildShare, settings.login, settings.gameName]);
+  if (key === extrasKey) return;
+  extrasKey = key;
+  twitch?.stop(); twitch = null;
+  const channel = channelName(settings.twitchChannel);
+  if (channel) twitch = twitchChat(channel, addMsg, extraStatus);
+  const code = guildCode(settings.guildCode);
+  if (!code) { guild?.stop(); guild = null; return; }
+  if (!guild || guild.code !== code || guild.share !== (settings.guildShare !== false)) {
+    guild?.stop();
+    if (!settings.readerId) saveSettings({ readerId: "web-" + crypto.randomUUID().replace(/-/g, "").slice(0, 16) });
+    guild = new GuildPeer({ code, reader: settings.readerId, share: settings.guildShare !== false, tab: true,
+      put: addMsg, status: extraStatus, cfg: settings.guildCfg?.code === code ? settings.guildCfg : null });
+    guild.onCfg = cfg => saveSettings({ guildCfg: { ...cfg, code } });
+  }
+  guild.gameName = settings.gameName || "";
+  guild.login = settings.login || "";
+}
+
+let extraNote = "";
+function extraStatus(text) { extraNote = text; status($("#status").dataset.main || ""); }
 
 // ---------------------------------------------------------------- showing it
 
@@ -225,11 +268,24 @@ function line(m) {
   const d = document.createElement("div");
   d.className = "msg";
   const t = new Date(m.at), stamp = settings.timestamps ? `[${String(t.getHours()).padStart(2, "0")}:${String(t.getMinutes()).padStart(2, "0")}] ` : "";
-  const who = m.kind === "whisper" ? (m.sent ? `To ${m.name}` : `From ${m.name}`) : m.name;
+  const who = m.kind === "whisper" ? (m.sent ? `To ${m.name}` : `From ${m.name}`)
+    : m.kind === "discord" ? `${m.name} (Discord)` : m.name;
   d.textContent = stamp + (who ? `${who} : ` : "") + m.body;
-  d.style.color = m.fg || COLOURS[m.kind] || "#fff";
+  d.style.color = readable(m.fg) || COLOURS[m.kind] || "#fff";
   if (m.bg) d.style.background = m.bg;
   return d;
+}
+
+// a colour light enough to read on the dark background (Twitch names can be any colour, even dark blue)
+function readable(c) {
+  const m = /^#([0-9a-f]{6})$/i.exec(c || "");
+  if (!m) return c;
+  let [r, g, b] = [0, 2, 4].map(i => parseInt(m[1].slice(i, i + 2), 16));
+  const l = 0.299 * r + 0.587 * g + 0.114 * b;
+  if (l >= 110) return c;
+  const k = (110 - l) / (255 - l);  // mixed towards white
+  [r, g, b] = [r, g, b].map(v => Math.round(v + (255 - v) * k));
+  return `rgb(${r},${g},${b})`;
 }
 
 function render() {
@@ -238,6 +294,7 @@ function render() {
   const panes = settings.panes?.length ? settings.panes : [{ tab: "Mega", grow: 1 }, { tab: "All", grow: 2 }];
   // keep each pane's scroll: stuck to the newest unless scrolled up
   const stuck = [...host.querySelectorAll(".list")].map(l => l.scrollTop + l.clientHeight >= l.scrollHeight - 4);
+  const typing = document.activeElement?.classList.contains("say");  // (kept typing through a redraw)
   host.innerHTML = "";
   panes.forEach((pane, i) => {
     if (i) {
@@ -249,7 +306,7 @@ function render() {
     const el = document.createElement("section");
     el.className = "pane"; el.style.flexGrow = pane.grow || 1;
     const bar = document.createElement("nav");
-    for (const name of Object.keys(TABS)) {
+    for (const name of tabsShown()) {
       const b = document.createElement("button");
       b.textContent = name; b.className = name === pane.tab ? "on" : "";
       b.onclick = () => { panes[i] = { ...pane, tab: name }; saveSettings({ panes }); render(); };
@@ -263,11 +320,28 @@ function render() {
     }
     const list = document.createElement("div");
     list.className = "list";
-    for (const m of log.filter(m => TABS[pane.tab]?.has(m.kind)).slice(-200)) list.appendChild(line(m));
+    const kinds = kindsOf(pane.tab) || TABS.All;
+    for (const m of log.filter(m => kinds.has(m.kind)).slice(-200)) list.appendChild(line(m));
     el.append(bar, list);
+    if (pane.tab === "Guild" && guild) {  // typing to the guild: its Discord channel and every member's Guild tab
+      const input = document.createElement("input");
+      input.className = "say"; input.placeholder = settings.gameName || settings.login
+        ? "Type to the guild, Enter to send" : "Put your character's name in Settings to type here";
+      input.value = draft;
+      input.oninput = () => { draft = input.value; };
+      input.onkeydown = async e => {
+        if (e.key !== "Enter" || !input.value.trim()) return;
+        const why = await guild.sayChat(input.value);
+        if (why) extraStatus(why); else { input.value = draft = ""; }
+      };
+      el.append(input);
+    }
     host.appendChild(el);
-    if (stuck[i] !== false) list.scrollTop = list.scrollHeight;
   });
+  // to the newest, once every pane is in (a pane alone is taller, and its scroll would be cut short)
+  host.querySelectorAll(".list").forEach((list, i) => { if (stuck[i] !== false) list.scrollTop = list.scrollHeight; });
+  const say = host.querySelector(".say");
+  if (typing && say) { say.focus(); say.setSelectionRange(draft.length, draft.length); }  // (on the page by now)
 }
 
 function dragDivider(e, i) {
@@ -294,7 +368,10 @@ function split() {
   render();
 }
 
-function status(text) { $("#status").textContent = text; }
+function status(text) {
+  $("#status").dataset.main = text;
+  $("#status").textContent = text + (extraNote ? "  ·  " + extraNote : "");
+}
 
 // ---------------------------------------------------------------- start
 
@@ -302,8 +379,9 @@ $("#share").onclick = share;
 $("#pick").onclick = pickRegion;
 $("#split").onclick = split;
 $("#clear").onclick = () => { log = []; keepLog(); render(); };
-onSettings(render);
+onSettings(() => { startExtras(); render(); });
 showStart();
+startExtras();
 render();
 status("Loading text recognition…");
 R.loadModel().then(() => {
