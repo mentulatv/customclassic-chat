@@ -69,9 +69,9 @@ Right-click the tray icon → **Settings…**. Changes apply right away.
 - **Extras:** your own tab, windows and splits, Twitch, Guild ↔ Discord.
 - **Advanced:** font and colours, history length, reading speed.
 
-**Reading speed** (Advanced → Performance): the chat is only read when it changes. **Balanced**
-suits most PCs; **Light** uses less CPU but can miss lines in very busy places like the Free
-Market; **Fastest** never waits. A taller game chat helps at any speed.
+**Reading speed** (Advanced → Performance): the chat is only read when it changes. **Fastest**
+(the default) reads every change; **Balanced** and **Light** use a little less CPU but can miss
+lines in heavy spam like Kerning PQ. A taller game chat helps more than any speed.
 
 ## Twitch chat
 

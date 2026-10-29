@@ -581,20 +581,20 @@ class SettingsWindow:
         """How eagerly the chat is read (reading takes the most CPU), and what the last minute cost."""
         app, opts = self.app, self.opts
         from customclassic_chat import READ_STATS, chat_lines
-        c = card(page, "Reading speed", "The chat is only read when something new shows in the game's chat, so a "
-                                        "quiet chat costs next to nothing whichever you pick.")
+        c = card(page, "Reading speed", "The chat is only read when it changes, so a quiet chat costs next to "
+                                        "nothing whichever you pick.")
         speed = tk.StringVar(value=opts["reading_speed"])
         for value, text, hint in [
-                ("fastest", "Fastest", "Reads each new line as soon as it shows. Uses the most CPU in busy places."),
-                ("balanced", "Balanced (recommended)", "In busy places it waits a moment and reads a few new lines at "
-                                                       "once. Keeps up with bursts of about 3 lines a second."),
-                ("light", "Light", "For slower computers: reads less often. Keeps up with about 1 line a second, so "
-                                   "in the busiest places (Free Market, Kerning PQ) a burst of megaphones can scroll "
-                                   "past unread.")]:
+                ("fastest", "Fastest (recommended)", "Reads every change right away. Most of the CPU is saved by not "
+                                                     "reading a chat that hasn't changed, so this costs little more."),
+                ("balanced", "Balanced", "In a busy chat it waits a moment and reads a few new lines at once: a "
+                                         "little less CPU, but in heavy spam it can miss a few lines."),
+                ("light", "Light", "For slower computers: reads less often in a busy chat. Can miss many lines "
+                                   "when the chat floods (Free Market, Kerning PQ).")]:
             radio(c, text, speed, value, lambda: app.set_opt("reading_speed", speed.get())).pack(fill="x")
-            label(c, hint, soft=True, size=9, wrap=440).pack(fill="x", padx=(22, 0), pady=(0, 6))
-        tall = label(c, "", soft=True, size=9, wrap=470)
-        tall.pack(fill="x", pady=(4, 0))
+            label(c, hint, soft=True, size=9, wrap=440).pack(fill="x", padx=(22, 0), pady=(0, 4))
+        tall = label(c, "", size=9, wrap=470)  # busy places: what helps most
+        tall.pack(fill="x", pady=(6, 0))
 
         c = card(page, "The last minute", f"Kept a minute a line in {READ_STATS.name} (the cache folder), to compare "
                                           "speeds by.")
@@ -605,8 +605,9 @@ class SettingsWindow:
             if not last.winfo_exists():
                 return
             n = chat_lines(app.read_rect, app.line)
-            tall.configure(text=f"The game's chat shows {n} lines. A taller chat lets any speed miss less, as more "
-                                "lines fit between two reads." if n else "")
+            tall.configure(text="Busy places: spam (Kerning PQ, say) can push half a dozen lines into the chat in a "
+                                "second, so a line may be on screen only a second or two. A taller game chat helps "
+                                "more than any speed" + (f": yours shows {n} lines now." if n else "."))
             s = app.read_stats
             if s:
                 missed = f"{s['gaps']} time{'s' if s['gaps'] != 1 else ''} lines may have scrolled past unread" \
