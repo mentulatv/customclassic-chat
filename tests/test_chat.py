@@ -466,6 +466,16 @@ def test_the_chat_is_read_only_when_it_changed_and_paced_to_its_speed():
     assert (dd.looked, dd.fresh) == (2, 1)
 
 
+def test_padded_lines_are_shown_without_their_spacers():
+    assert mc.unpadded("S> Claw 60% 170k@@@@@@@@@@@@@@@@@@QQQQQ@Q④Q") == "S> Claw 60% 170k"
+    assert mc.unpadded("S> +2crit WG @@@@@@@ Maple-Stein Head @@@@@@ Trash NX 16K ea") == \
+        "S> +2crit WG · Maple-Stein Head · Trash NX 16K ea"
+    assert mc.unpadded("============== B> Clean Emerald Earring!") == "B> Clean Emerald Earring!"
+    assert mc.unpadded("S> GFA 60 1000000 @@@@@@@@") == "S> GFA 60 1000000"  # a price keeps its zeros
+    assert mc.unpadded("B> Dagger 60% ----145k----") == "B> Dagger 60% · 145k"
+    assert mc.unpadded("B> wand 1O0k @@@@") == "B> wand 1O0k"  # 100k read as 1O0k
+
+
 def test_a_padded_line_read_again_is_not_new():
     # its spacers read differently every time: the same line all the same
     dd = mc.Dedupe()

@@ -315,6 +315,24 @@ def without_spacers(text: str) -> str:
     return SPACER_RUN.sub(drop, text)
 
 
+PAD_RUN = re.compile(r"[@QqOo0④α]{3,}|[~=*#$\-_.!]{4,}")
+
+
+def unpadded(body: str) -> str:
+    """A padded line as it's shown: the spacers padding it out gone, and those between items
+    ("WG @@@@@@ Maple-Stein Head @@@@@@ Trash NX") a dot. Zeros in a number stay, and so does a
+    short run of O's (a word, or "1O0k")."""
+    def sub(m):
+        run, at = m.group(), m.start()
+        if set(run) <= {"0"} and at and body[at - 1].isdigit():
+            return run
+        if set(run) <= {"0", "O", "o"} and len(run) < 6:
+            return run
+        return " · "
+    text = re.sub(r"\s*(?:·\s*)+", " · ", PAD_RUN.sub(sub, body))
+    return text.strip(" ·") or body
+
+
 class Dedupe:
     """The chat shows each line for many reads, and text recognition reads it a little
     differently now and then ("CHO1" / "CH01"): a line close to one seen recently is not new."""
@@ -2990,6 +3008,7 @@ class ChatPanel:
                 if kind == "msg":
                     if data["kind"] in SPACER_KINDS and padded(data["body"]):
                         data["padded"] = padded_kind(data["body"])
+                        data["body"] = unpadded(data["body"])
                     if data.get("padded") not in self.log.hide_padded:  # left out: no alerts either
                         self.watched(data)
                     if self.relay and not self.demo:
