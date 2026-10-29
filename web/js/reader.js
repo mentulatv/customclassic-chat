@@ -20,7 +20,7 @@ export async function loadModel(base = "models/") {
     fetch(base + "rec.onnx").then(r => r.arrayBuffer()),
     fetch(base + "chars.txt").then(r => r.text()),
   ]);
-  chars = ["", ...list.split("\n"), " "];  // 0 is CTC's blank
+  chars = ["", ...list.split(/\r?\n/), " "];  // 0 is CTC's blank
   if ("gpu" in navigator) {
     try {
       session = await ort.InferenceSession.create(model, { executionProviders: ["webgpu"] });
