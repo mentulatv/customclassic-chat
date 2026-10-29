@@ -315,7 +315,9 @@ def without_spacers(text: str) -> str:
     return SPACER_RUN.sub(drop, text)
 
 
-PAD_RUN = re.compile(r"[@QqOo0④α]{3,}|[~=*#$\-_.!]{4,}")
+# spacers: @ runs (also read as Q, O, 0, ④, ①...), and runs of other symbols
+PAD_RUN = re.compile(r"[@QqOo0α①-⑳]{3,}|[@①-⑳]{2,}|[~=*#$\-_.!]{4,}")
+PAD_ENDS = re.compile(r"^[\s.~=*\-_@]{2,}|[\s#~@*①-⑳]+$")  # "....S> hat", "75k~", "quick#"
 
 
 def unpadded(body: str) -> str:
@@ -330,7 +332,8 @@ def unpadded(body: str) -> str:
             return run
         return " · "
     text = re.sub(r"\s*(?:·\s*)+", " · ", PAD_RUN.sub(sub, body))
-    return text.strip(" ·") or body
+    text = re.sub(r" · \S{1,2}$", "", text.strip(" ·"))  # a stray character read after the padding
+    return PAD_ENDS.sub("", text).strip(" ·") or body
 
 
 class Dedupe:
@@ -3006,8 +3009,9 @@ class ChatPanel:
                     print(time.strftime("%H:%M:%S"), kind, f"{data['kind']:>7} {line_text(data)}" if kind == "msg" else data,
                           flush=True)
                 if kind == "msg":
-                    if data["kind"] in SPACER_KINDS and padded(data["body"]):
-                        data["padded"] = padded_kind(data["body"])
+                    if data["kind"] in SPACER_KINDS:
+                        if padded(data["body"]):
+                            data["padded"] = padded_kind(data["body"])
                         data["body"] = unpadded(data["body"])
                     if data.get("padded") not in self.log.hide_padded:  # left out: no alerts either
                         self.watched(data)

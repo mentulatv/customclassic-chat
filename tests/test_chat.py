@@ -474,6 +474,22 @@ def test_padded_lines_are_shown_without_their_spacers():
     assert mc.unpadded("S> GFA 60 1000000 @@@@@@@@") == "S> GFA 60 1000000"  # a price keeps its zeros
     assert mc.unpadded("B> Dagger 60% ----145k----") == "B> Dagger 60% · 145k"
     assert mc.unpadded("B> wand 1O0k @@@@") == "B> wand 1O0k"  # 100k read as 1O0k
+    # as read in the Free Market
+    for read, shown in [
+            ("B>FOUNDERS CRATE(11) 275K HALLOWEEN CRATE(11) 375K@QQ@Q@Q@Q@Q@@Q@Q@@Q2",
+             "B>FOUNDERS CRATE(11) 275K HALLOWEEN CRATE(11) 375K"),
+            ("....S> DemonGoblin Gargoly Wings Witch clothes Witch hat", "S> DemonGoblin Gargoly Wings Witch clothes Witch hat"),
+            ("B>6 ATT WORK GLOVES@@", "B>6 ATT WORK GLOVES"),
+            ("S> +1 Bazlud 20k quick#", "S> +1 Bazlud 20k quick"),
+            ("S> DARK DEVIL HAT 75k~", "S> DARK DEVIL HAT 75k"),
+            ("SELL 100% STR OVERALL 65K SCROOLL LESSERR @@@@@ @@ @@", "SELL 100% STR OVERALL 65K SCROOLL LESSERR"),
+            ("B>OVERALL 10% SCROLL STR/DEX/INT/LUK 7K EACH@@@@5AUNA23K@QQ①@@@@@",
+             "B>OVERALL 10% SCROLL STR/DEX/INT/LUK 7K EACH · 5AUNA23K"),
+            ("B>Lv30 Thief Luk Gear @@@@ @@@@", "B>Lv30 Thief Luk Gear"),
+            ("S> WHITE LABEL 425K.", "S> WHITE LABEL 425K."),
+            ("anyone going to Kerning?", "anyone going to Kerning?"),
+            ("cooool, see you @ FM", "cooool, see you @ FM")]:
+        assert mc.unpadded(read) == shown, read
 
 
 def test_a_padded_line_read_again_is_not_new():
