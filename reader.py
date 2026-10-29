@@ -37,6 +37,7 @@ MEGAPHONES = {"megaphone", "super_megaphone", "item_megaphone"}
 WHISPER = re.compile(r"^\W{0,3}(?:\[\s?\d{1,2}\s?[:.;]\s?\d{2}\s?\]\s*)?[A-Za-z0-9]{2,13}\s*(?:<<|>>|«|»)")
 
 REREAD_BELOW = 0.8  # lines read with less confidence get their row OCR'd again on its own
+PADDING = re.compile(r"[@QqO0④α~=*#$\-]{6,}")  # spacers padding a line out (@@@@@@, read as @QQ@④Q too)
 
 GUILD_CONFIRMED = False  # the guild colour below is a stand-in until the game has guild chat
 FIND_SCALE = 1.5  # zoom for finding the chat box in the lower game window (reading the chat itself uses `scale`)
@@ -114,7 +115,11 @@ class Reader:
         self.cfg = cfg
         from rapidocr import RapidOCR  # imported here so `--help` is instant
         # "error": an empty chat box (game hidden) would otherwise log a warning every frame
-        params = {"Global.log_level": "error", "EngineConfig.onnxruntime.intra_op_num_threads": ocr_threads(cfg.threads),
+        # no angle check: chat text is never upside down, but the check sometimes decided a line
+        # was and read it turned over ("0 k 6 < s< : s" for "Saqe : B>Mystery Palettes 70k"), and
+        # it took 15 to 35% of each read
+        params = {"Global.log_level": "error", "Global.use_cls": False,
+                  "EngineConfig.onnxruntime.intra_op_num_threads": ocr_threads(cfg.threads),
                   "EngineConfig.onnxruntime.inter_op_num_threads": 1}
         self.engine = RapidOCR(params=params) if _rapid_accepts_params() else RapidOCR()
 
@@ -124,7 +129,10 @@ class Reader:
         if not boxes:
             return []
         height = float(np.median([b[1] - b[0] for b in boxes]))
-        lines = [ln if ln.conf >= REREAD_BELOW else self._reread(rgb, ln, height) for ln in self._group(boxes)]
+        # (a row padded with spacers reads with little confidence however it's read: reading it
+        # again on its own took half of each read in the Free Market, for nothing)
+        lines = [ln if ln.conf >= REREAD_BELOW or PADDING.search(ln.text) else self._reread(rgb, ln, height)
+                 for ln in self._group(boxes)]
         arr = np.asarray(rgb)
         for ln in lines:
             ln.color, ln.bg, ln.band = _line_colors(arr, ln)

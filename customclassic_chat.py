@@ -302,6 +302,19 @@ def kind_of(line, backgrounds: dict | None = None) -> str | None:
     return "mega" if line.band else "other"
 
 
+SPACER_RUN = re.compile(r"[@QqOo0④α]{3,}")
+
+
+def without_spacers(text: str) -> str:
+    """A line without its spacer padding (@@@@@@), which text recognition reads a little
+    differently every time (@QQ@④QQ, OOOOOOOO): runs of those symbols, unless a short run of
+    only 0's and O's (a price, "100k" read as "1O0k", or a word)."""
+    def drop(m):
+        run = m.group()
+        return run if set(run) <= {"0", "O", "o"} and len(run) < 6 else " "
+    return SPACER_RUN.sub(drop, text)
+
+
 class Dedupe:
     """The chat shows each line for many reads, and text recognition reads it a little
     differently now and then ("CHO1" / "CH01"): a line close to one seen recently is not new."""
@@ -316,11 +329,11 @@ class Dedupe:
         game's chat still shows them, and they aren't new again."""
         for m in messages:
             if m.get("raw") and now - m.get("at", 0) < self.minutes * 60:
-                self.recent.append((m["at"], re.sub(r"[^a-z0-9]", "", m["raw"].lower())))
+                self.recent.append((m["at"], re.sub(r"[^a-z0-9]", "", without_spacers(m["raw"]).lower())))
 
     def is_new(self, text: str, now: float) -> bool:
         from rapidfuzz import fuzz
-        key = re.sub(r"[^a-z0-9]", "", text.lower())
+        key = re.sub(r"[^a-z0-9]", "", without_spacers(text).lower())
         self.looked += 1
         while self.recent and self.recent[0][0] < now - self.minutes * 60:
             self.recent.popleft()

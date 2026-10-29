@@ -466,6 +466,18 @@ def test_the_chat_is_read_only_when_it_changed_and_paced_to_its_speed():
     assert (dd.looked, dd.fresh) == (2, 1)
 
 
+def test_a_padded_line_read_again_is_not_new():
+    # its spacers read differently every time: the same line all the same
+    dd = mc.Dedupe()
+    assert dd.is_new("[00:48] Marokay: B>EARRING LIK 10%@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@", 0)
+    assert not dd.is_new("[00:48]Marokay: B>EARRING LIK 10%@@@@@@@@@@@@@@@@@@@QQQQQQQQQQQQQQQQQQQQQQQQQQQQQ", 5)
+    assert not dd.is_new("[00:48] Marokay : B>EARRING LIK 10%@@@@@@@@@@@@@@@@@@@@@@@@@@@Q@@@@@@@@Q@@@@@QQ@", 9)
+    assert dd.is_new("[00:49] Marokay : B>EARRING DEX 60% @@@@@@@@@@@@@@@@@@@@", 12)  # another line: new
+    # a price keeps its zeros, also read as O's
+    assert mc.without_spacers("S> claw 100k @@@@QQQ@@") .split() == ["S>", "claw", "100k"]
+    assert "1O0k" in mc.without_spacers("S> claw 1O0k")
+
+
 def test_text_recognition_leaves_most_cores_to_the_game():
     import os
     import reader
