@@ -18,3 +18,4 @@ crash.log
 bot/.env
 bot/data/
 errors.log
+web/test/

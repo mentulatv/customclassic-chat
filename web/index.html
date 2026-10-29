@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CustomClassic Chat</title>
+<meta name="description" content="A chat and smega blocker for MapleStory Classic World, in your browser.">
+<link rel="icon" href="logo.svg">
+<link rel="stylesheet" href="style.css">
+</head>
+<body class="home">
+<main>
+  <h1><img src="logo.svg" alt="" width="36" height="36"> CustomClassic Chat</h1>
+  <p class="lead">A cleaner chat for MapleStory Classic World: megaphones in their own tab, spacer spam
+    gone. It reads the game's chat from a shared window, right in your browser.</p>
+
+  <button id="open" class="primary big">Open chat window</button>
+
+  <ol class="steps">
+    <li>Open the chat window and click <b>Share game window</b>. Pick MapleStory's window.</li>
+    <li>It finds the game's chat by itself, and follows it when you resize it. (Not found? Drag a box around the chat lines.)</li>
+    <li>Keep the game's chat at least 4 lines tall. More lines miss less in busy places.</li>
+  </ol>
+
+  <section class="card">
+    <h2>Settings</h2>
+    <label>Text size <input id="fontSize" type="range" min="11" max="22"> <span id="fontSizeOut"></span></label>
+    <label><input id="timestamps" type="checkbox"> Time stamps</label>
+    <button id="region">Find the chat box by itself again</button>
+  </section>
+
+  <p class="small">Nothing leaves your computer: the game's picture is read in this browser and never sent
+    anywhere. Third-party, not made or endorsed by Nexon. Want the overlay that sits on the game's
+    chat? Get the <a href="https://github.com/mentulatv/customclassic-chat">Windows app</a>.</p>
+</main>
+<script type="module">
+import { settings, saveSettings, onSettings } from "./js/settings.js";
+const $ = s => document.querySelector(s);
+const show = () => {
+  $("#fontSize").value = settings.fontSize; $("#fontSizeOut").textContent = settings.fontSize + " px";
+  $("#timestamps").checked = settings.timestamps;
+};
+$("#fontSize").oninput = e => { saveSettings({ fontSize: +e.target.value }); show(); };
+$("#timestamps").onchange = e => saveSettings({ timestamps: e.target.checked });
+$("#region").onclick = () => { saveSettings({ region: null, autoFind: true }); $("#region").textContent = "Done: the chat window looks for it"; };
+$("#open").onclick = () => window.open("chat.html", "ccc-chat", "popup,width=620,height=460");
+onSettings(show);
+show();
+</script>
+</body>
+</html>

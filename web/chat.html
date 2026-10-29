@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CustomClassic Chat</title>
+<link rel="icon" href="logo.svg">
+<link rel="stylesheet" href="style.css">
+</head>
+<body class="chat">
+<header>
+  <button id="share" class="primary">Share game window</button>
+  <button id="pick" hidden>Chat box…</button>
+  <button id="split" title="Add a split on top">Split</button>
+  <button id="clear" title="Clear the chat">Clear</button>
+  <span id="status"></span>
+</header>
+<main id="panes"></main>
+<dialog id="picker">
+  <p>Drag a box around the game's chat lines (from the top line down to just above the typing bar).</p>
+  <canvas></canvas>
+  <div class="row"><button id="picker-auto">Find it by itself</button><button id="picker-again">Refresh picture</button><button id="picker-ok" class="primary">Done</button></div>
+</dialog>
+<script type="module" src="js/chat.js"></script>
+</body>
+</html>
