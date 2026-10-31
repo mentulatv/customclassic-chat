@@ -1,6 +1,10 @@
 // Settings, kept in this browser and shared by the main page and its chat windows.
 const KEY = "ccc.settings";
-const DEFAULTS = { fontSize: 14, timestamps: true, region: null, autoFind: true, panes: null,
+const DEFAULTS = { fontSize: 14, timestamps: "minutes", region: null, autoFind: true, panes: null, windows: {},
+  hideSystem: false, hidePadded: [], ignoreNames: [], whisperSound: true, volume: 0.4, keepHours: 12,
+  custom: { on: true, name: "Custom", kinds: ["whisper", "party", "buddy"] },
+  watch: [], watchMap: false, watchSound: true, watchPopup: true,
+  fontFamily: "", bold: false, background: "", colors: {}, dismissed: null,
   twitchChannel: "", twitchInAll: false, guildCode: "", guildShare: true, gameName: "", login: "", readerId: "", guildCfg: null };
 
 export const settings = { ...DEFAULTS, ...read() };
@@ -9,7 +13,9 @@ export const settings = { ...DEFAULTS, ...read() };
 navigator.storage?.persist?.().catch(() => {});
 
 // the setup (not the chat) as one line, to take to another browser or keep somewhere safe
-const PORTABLE = ["fontSize", "timestamps", "panes", "twitchChannel", "twitchInAll", "guildCode", "guildShare", "gameName", "login"];
+const PORTABLE = ["fontSize", "timestamps", "panes", "windows", "hideSystem", "hidePadded", "ignoreNames", "whisperSound",
+  "volume", "keepHours", "custom", "watch", "watchMap", "watchSound", "watchPopup", "fontFamily", "bold", "background", "colors",
+  "twitchChannel", "twitchInAll", "guildCode", "guildShare", "gameName", "login"];
 export function exportSetup() {
   return "ccc1:" + btoa(unescape(encodeURIComponent(JSON.stringify(Object.fromEntries(PORTABLE.map(k => [k, settings[k]]))))));
 }

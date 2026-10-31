@@ -26,7 +26,7 @@ from rapidfuzz import fuzz, process
 # files are in its _internal folder); run from source, next to this file
 HERE = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
 NAMES_FILE = HERE / "cache" / "names.json"
-NAMES_URL = "https://mapleprice.mentula.tv/api/names"
+NAMES_URL = "https://customclassic.chat/api/names"
 NAMES_EVERY = 3600
 FUZZY = 88  # how close a spelling must be to count
 REPEAT_S = 600  # the same entry and player alert once per 10 minutes

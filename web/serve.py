@@ -2,7 +2,7 @@
 
 It sends the two headers that let the page use several threads for text recognition when the
 graphics card can't (COOP/COEP: the page is "cross-origin isolated"). A host serving the site
-(ccc.mentula.tv) should send the same two."""
+(customclassic.chat) should send the same two."""
 import sys
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer

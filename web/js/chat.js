@@ -1,40 +1,70 @@
-// The chat window: shares the game's window, reads its chat a few times a second, and shows it
-// in tabs, split into panes. Everything stays in this browser.
+// A chat window. The main one shares the game's window and reads its chat a few times a second;
+// extra windows (chat.html?w=2) show the same chat, each with its own tabs and splits. The chat
+// is filtered as the desktop app does it: megaphones to their own tab, spacer padding cleaned,
+// lines read twice dropped, and the watch list looking out for what you're after. Everything
+// stays in this browser.
 import * as R from "./reader.js";
 import { settings, saveSettings, onSettings } from "./settings.js";
 import { GuildPeer, guildCode } from "./guild.js";
 import { twitchChat, channelName } from "./twitch.js";
+import * as F from "./filters.js";
 
+const WIN = new URLSearchParams(location.search).get("w") || "main";  // which window this is
+const MAIN = WIN === "main";
+// the tabs, in this order: the game's chat first, then the guild's, then Twitch
 const TABS = {
   All: new Set(["map", "whisper", "party", "buddy", "guild", "other", "system"]),
   Whisper: new Set(["whisper"]), Buddy: new Set(["buddy", "guild"]), Mega: new Set(["mega"]), Map: new Set(["map"]),
+  Watch: null, Custom: null,
   Guild: new Set(["guild", "guildsay", "discord"]), Twitch: new Set(["twitch"]),
 };
-const kindsOf = tab => tab === "All" && settings.twitchInAll ? new Set([...TABS.All, "twitch"]) : TABS[tab];
-const tabsShown = () => Object.keys(TABS).filter(t => (t !== "Guild" || settings.guildCode) && (t !== "Twitch" || settings.twitchChannel));
 const COLOURS = { map: "#ffffff", whisper: "#00ff00", buddy: "#ff9900", mega: "#f2a7cf", system: "#ffafaf", other: "#c8d2e4",
   guild: "#c8b4ff", guildsay: "#9fe3b8", discord: "#8ea1f0", twitch: "#bf94ff" };
+const DEFAULT_PANES = [{ tab: "Mega", grow: 1 }, { tab: "All", grow: 2 }];
 const $ = s => document.querySelector(s);
-const video = document.createElement("video");
-video.muted = true; video.playsInline = true;
-const work = document.createElement("canvas");
-const wctx = work.getContext("2d", { willReadFrequently: true });
-let stream = null, busy = false, lastRead = null, readMs = 0;
-const dedupe = new R.Dedupe(), rowCache = new Map();
+
+// which messages a tab shows
+function shows(tab, m) {
+  if (tab === "Watch") return !!m.watch;
+  if (tab === "Custom") return (settings.custom?.kinds || []).includes(m.kind) || (m.watch && settings.custom?.kinds?.includes("watch"));
+  if (tab === "All" && m.kind === "twitch") return settings.twitchInAll;
+  return TABS[tab]?.has(m.kind);
+}
+// left out by the chat options (kept in the log, so changing them brings them back)
+const leftOut = m => (settings.hideSystem && m.kind === "system") || (m.padded && settings.hidePadded?.includes(m.padded));
+const tabName = t => t === "Custom" ? settings.custom?.name || "Custom" : t;
+const tabsShown = () => Object.keys(TABS).filter(t =>
+  (t !== "Guild" || settings.guildCode) && (t !== "Twitch" || settings.twitchChannel) && (t !== "Custom" || settings.custom?.on));
+
+// ---------------------------------------------------------------- the log, shared by every window
+
 let log = loadLog();
-for (const m of log) dedupe.isNew(m.raw || m.body);
-
-// ---------------------------------------------------------------- the log
-
 function loadLog() {
   try { return JSON.parse(localStorage.getItem("ccc.log") || "[]"); } catch { return []; }
 }
 function keepLog() {
-  log = log.slice(-500);
+  const hours = settings.keepHours, since = hours ? Date.now() - hours * 3600000 : 0;
+  log = log.filter(m => m.at >= since).slice(-800);
   try { localStorage.setItem("ccc.log", JSON.stringify(log)); } catch {}
 }
 
-// ---------------------------------------------------------------- sharing the game
+// what the filter did this session, said at the top so it's plain the chat is being cleaned
+const counts = { mega: 0, cleaned: 0, repeats: 0, watch: 0 };
+function filterNote() {
+  const bits = [`${counts.mega} megaphones to Mega`, `${counts.cleaned} spacer lines cleaned`, `${counts.repeats} repeats dropped`];
+  if (counts.watch) bits.push(`${counts.watch} watch-list hits`);
+  $("#filter").textContent = "Chat filter on · " + bits.join(" · ");
+}
+
+// ---------------------------------------------------------------- the main window: sharing the game
+
+const video = document.createElement("video");
+video.muted = true; video.playsInline = true;
+const work = document.createElement("canvas"), wctx = work.getContext("2d", { willReadFrequently: true });
+const full = document.createElement("canvas"), fctx = full.getContext("2d", { willReadFrequently: true });
+let stream = null, busy = false, lastRead = null, found = false, rowsSeen = 0;
+const dedupe = new R.Dedupe(), rowCache = new Map();
+for (const m of log) dedupe.isNew(m.raw || m.body);
 
 async function share() {
   try {
@@ -45,7 +75,7 @@ async function share() {
   }
   video.srcObject = stream;
   await video.play();
-  stream.getVideoTracks()[0].addEventListener("ended", () => { stream = null; showStart(); status("Sharing stopped."); });
+  stream.getVideoTracks()[0].addEventListener("ended", () => { stream = null; showStart(); status("Sharing stopped."); warn(""); });
   showStart();
   status("Looking for the game's chat…");
   const since = Date.now();
@@ -55,11 +85,10 @@ async function share() {
   }, 500);
 }
 
-// ---------------------------------------------------------------- the chat box, found by itself
-
-const full = document.createElement("canvas");
-const fctx = full.getContext("2d", { willReadFrequently: true });
-let found = false;
+function showStart() {
+  $("#share").hidden = !MAIN || !!stream;
+  $("#pick").hidden = !MAIN || !stream;
+}
 
 // every few seconds: where the game's chat is now (it may have been resized), from its scrollbar
 function findChat() {
@@ -69,7 +98,7 @@ function findChat() {
   fctx.drawImage(video, 0, 0);
   const box = R.findChat(fctx.getImageData(0, 0, vw, vh));
   if (!box) {
-    if (found) status("Can't see the game's chat: is it open, and not covered?");
+    if (found) warn("Can't see the game's chat: it's closed or covered. Open it so it can be read.");
     found = false;
     return;
   }
@@ -82,13 +111,6 @@ function findChat() {
   if (!found) status("Found the game's chat. Reading…");
   found = true;
 }
-
-function showStart() {
-  $("#share").hidden = !!stream;
-  $("#pick").hidden = !stream;
-}
-
-// ---------------------------------------------------------------- the chat box, picked by dragging
 
 function pickRegion() {
   if (!stream) return;
@@ -114,11 +136,7 @@ function pickRegion() {
     draw();
   };
   cv.onpointerup = () => { from = null; };
-  $("#picker-auto").onclick = () => {
-    saveSettings({ autoFind: true });
-    findChat();
-    dlg.close();
-  };
+  $("#picker-auto").onclick = () => { saveSettings({ autoFind: true }); findChat(); dlg.close(); };
   $("#picker-ok").onclick = () => {
     if (box && box.w > 0.05 && box.h > 0.02) {
       saveSettings({ region: box, autoFind: false });  // picked by hand: kept, not looked for
@@ -148,8 +166,7 @@ function changed(a, b) {
   let n = 0, total = 0;
   for (let i = 0; i < a.data.length; i += 16) {
     total++;
-    if (Math.max(Math.abs(a.data[i] - b.data[i]), Math.abs(a.data[i + 1] - b.data[i + 1]),
-      Math.abs(a.data[i + 2] - b.data[i + 2])) > 60) n++;
+    if (Math.max(Math.abs(a.data[i] - b.data[i]), Math.abs(a.data[i + 1] - b.data[i + 1]), Math.abs(a.data[i + 2] - b.data[i + 2])) > 60) n++;
   }
   return n / total > 0.01;
 }
@@ -172,6 +189,7 @@ async function readOnce() {
   const t0 = performance.now();
   try {
     const { rows } = R.rowsOf(img);
+    rowsSeen = rows.length;
     const lines = [];
     for (const [a, b] of rows) {
       const key = rowKey(img, a, b);
@@ -186,8 +204,10 @@ async function readOnce() {
     }
     take(merge(lines));
     lastRead = img;
-    readMs = performance.now() - t0;
-    status(`Reading: ${rows.length} rows, ${Math.round(readMs)} ms a read`);
+    status(`Reading: ${rows.length} rows, ${Math.round(performance.now() - t0)} ms a read`);
+    // a long megaphone takes two lines: under 3 and a couple arriving together scroll away unread
+    warn(rows.length && rows.length < 3 && settings.dismissed !== rows.length
+      ? `The game's chat shows only ${rows.length} line${rows.length > 1 ? "s" : ""}: make it at least 3 lines tall (4 or more is best).` : "");
   } catch (e) {
     status("Couldn't read the chat for a moment: " + e.message);
   }
@@ -206,6 +226,9 @@ function merge(lines) {
   return out;
 }
 
+const rgb = c => c ? `rgb(${c.join(",")})` : null;
+const ignored = name => (settings.ignoreNames || []).some(n => n && name.toLowerCase().includes(n.toLowerCase()));
+
 function take(lines) {
   let added = 0;
   for (const ln of lines) {
@@ -213,33 +236,73 @@ function take(lines) {
     if (!kind) continue;
     let p = R.parse(ln.text);
     if (!p && kind === "system") p = { name: "", body: ln.text.replace(R.STAMP, "").trim(), sep: "" };
-    if (!p || !dedupe.isNew(ln.text)) continue;
-    const body = ["map", "mega", "other"].includes(kind) ? R.unpadded(p.body) : p.body;
-    const msg = { kind: p.sep === "<<" || p.sep === ">>" || p.sep === "«" || p.sep === "»" ? "whisper" : kind,
-      name: p.name, body, sent: p.sep === "<<" || p.sep === "«", at: Date.now(), raw: ln.text, stamp: p.stamp,
+    if (!p) continue;
+    if (!dedupe.isNew(ln.text)) { counts.repeats++; continue; }
+    let body = p.body, pad = null;
+    if (["map", "mega", "other"].includes(kind)) {
+      if (F.padded(body)) { pad = F.paddedKind(body); counts.cleaned++; }
+      body = R.unpadded(body);
+    }
+    // your own characters' name tags behind the chat, read into a line, aren't chat
+    for (const n of settings.ignoreNames || []) if (n) body = body.replace(new RegExp(`\\s*\\b${n.replace(/\W/g, "")}\\b\\s*$`, "i"), "");
+    const sep = p.sep, whisper = ["<<", ">>", "«", "»"].includes(sep);
+    const msg = { kind: whisper ? "whisper" : kind, name: p.name, body, sent: sep === "<<" || sep === "«", at: Date.now(),
+      raw: ln.text, stamp: p.stamp, padded: pad,
       fg: kind === "mega" || kind === "system" ? rgb(ln.colours.text) : null, bg: kind === "mega" && ln.band ? rgb(ln.bg) : null };
+    if (msg.kind === "mega") counts.mega++;
+    checkWatch(msg);
+    if (msg.kind === "whisper" && !msg.sent && settings.whisperSound !== false) F.chime(F.WHISPER_NOTES, settings.volume);
     log.push(msg);
     if (msg.kind === "guild") guild?.send(msg);  // guild chat only: shared with the guild, if joined
     added++;
   }
   if (added) { keepLog(); render(); }
+  filterNote();
 }
-const rgb = c => c ? `rgb(${c.join(",")})` : null;
 
-// a message from Twitch or the guild's channel
+// ---------------------------------------------------------------- the watch list
+
+let watcher = null;
+async function loadWatcher() {
+  const catalog = await F.Catalog.load();
+  watcher = new F.Watcher(settings.watch || [], catalog, settings.watchMap ? ["mega", "map"] : ["mega"]);
+}
+function checkWatch(msg) {
+  if (!watcher || leftOut(msg)) return;
+  const why = watcher.check(msg);
+  if (!why.length) return;
+  msg.watch = why.join(", ");
+  counts.watch++;
+  if (settings.watchSound !== false) F.chime(F.WATCH_NOTES, settings.volume);
+  if (settings.watchPopup !== false) note(msg);
+}
+let noteTimer = 0;
+function note(msg) {  // a gold note at the top for 12 s; a click opens the Watch tab
+  const el = $("#note");
+  el.innerHTML = "";
+  const what = document.createElement("b"), line = document.createElement("div");
+  what.textContent = "★ " + msg.watch;
+  line.textContent = `${msg.name} : ${msg.body}`;
+  el.append(what, line);
+  el.hidden = false;
+  el.onclick = () => { el.hidden = true; const p = panes(); p[0] = { ...p[0], tab: "Watch" }; savePanes(p); render(); };
+  clearTimeout(noteTimer);
+  noteTimer = setTimeout(() => { el.hidden = true; }, 12000);
+}
+
+// ---------------------------------------------------------------- Twitch and the guild (the main window's)
+
 let pending = false, draft = "";
-function addMsg(msg) {
+function addMsg(msg) {  // a message from Twitch or the guild's channel
   log.push(msg);
   if (pending) return;
   pending = true;
   requestAnimationFrame(() => { pending = false; keepLog(); render(); });
 }
 
-// ---------------------------------------------------------------- Twitch and the guild
-
 let twitch = null, guild = null, extrasKey = "";
-
 function startExtras() {
+  if (!MAIN) return;
   const key = JSON.stringify([settings.twitchChannel, settings.guildCode, settings.guildShare, settings.login, settings.gameName]);
   if (key === extrasKey) return;
   extrasKey = key;
@@ -264,15 +327,21 @@ function extraStatus(text) { extraNote = text; status($("#status").dataset.main 
 
 // ---------------------------------------------------------------- showing it
 
+const two = n => String(n).padStart(2, "0");
+function stampOf(at) {
+  const t = new Date(at), fmt = settings.timestamps === false ? "off" : settings.timestamps === true ? "minutes" : settings.timestamps;
+  if (fmt === "off") return "";
+  return `[${two(t.getHours())}:${two(t.getMinutes())}${fmt === "seconds" ? ":" + two(t.getSeconds()) : ""}] `;
+}
+
 function line(m) {
   const d = document.createElement("div");
   d.className = "msg";
-  const t = new Date(m.at), stamp = settings.timestamps ? `[${String(t.getHours()).padStart(2, "0")}:${String(t.getMinutes()).padStart(2, "0")}] ` : "";
-  const who = m.kind === "whisper" ? (m.sent ? `To ${m.name}` : `From ${m.name}`)
-    : m.kind === "discord" ? `${m.name} (Discord)` : m.name;
-  d.textContent = stamp + (who ? `${who} : ` : "") + m.body;
-  d.style.color = readable(m.fg) || COLOURS[m.kind] || "#fff";
+  const who = m.kind === "whisper" ? (m.sent ? `To ${m.name}` : `From ${m.name}`) : m.kind === "discord" ? `${m.name} (Discord)` : m.name;
+  d.textContent = (m.watch ? "★ " : "") + stampOf(m.at) + (who ? `${who} : ` : "") + m.body;
+  d.style.color = settings.colors?.[m.kind] || readable(m.fg) || COLOURS[m.kind] || "#fff";
   if (m.bg) d.style.background = m.bg;
+  if (m.watch) d.title = m.watch;
   return d;
 }
 
@@ -288,15 +357,29 @@ function readable(c) {
   return `rgb(${r},${g},${b})`;
 }
 
+// this window's panes: the main window's, or an extra window's own
+const panes = () => (MAIN ? settings.panes : settings.windows?.[WIN]?.panes)?.length
+  ? structuredClone(MAIN ? settings.panes : settings.windows[WIN].panes) : structuredClone(MAIN ? DEFAULT_PANES : [{ tab: "All", grow: 1 }]);
+function savePanes(p) {
+  if (MAIN) saveSettings({ panes: p });
+  else saveSettings({ windows: { ...(settings.windows || {}), [WIN]: { panes: p } } });
+}
+
+function look() {
+  const s = document.documentElement.style;
+  s.setProperty("--text", settings.fontSize + "px");
+  s.setProperty("--chat-font", settings.fontFamily ? `"${settings.fontFamily}", sans-serif` : "inherit");
+  s.setProperty("--chat-weight", settings.bold ? "700" : "400");
+  s.setProperty("--chat-bg", settings.background || "#111827");
+}
+
 function render() {
-  document.documentElement.style.setProperty("--text", settings.fontSize + "px");
-  const host = $("#panes");
-  const panes = settings.panes?.length ? settings.panes : [{ tab: "Mega", grow: 1 }, { tab: "All", grow: 2 }];
-  // keep each pane's scroll: stuck to the newest unless scrolled up
+  look();
+  const host = $("#panes"), list = panes();
   const stuck = [...host.querySelectorAll(".list")].map(l => l.scrollTop + l.clientHeight >= l.scrollHeight - 4);
   const typing = document.activeElement?.classList.contains("say");  // (kept typing through a redraw)
   host.innerHTML = "";
-  panes.forEach((pane, i) => {
+  list.forEach((pane, i) => {
     if (i) {
       const div = document.createElement("div");
       div.className = "divider";
@@ -308,29 +391,30 @@ function render() {
     const bar = document.createElement("nav");
     for (const name of tabsShown()) {
       const b = document.createElement("button");
-      b.textContent = name; b.className = name === pane.tab ? "on" : "";
-      b.onclick = () => { panes[i] = { ...pane, tab: name }; saveSettings({ panes }); render(); };
+      b.textContent = tabName(name); b.className = name === pane.tab ? "on" : "";
+      b.onclick = () => { list[i] = { ...pane, tab: name }; savePanes(list); render(); };
       bar.appendChild(b);
     }
-    if (panes.length > 1) {
+    if (list.length > 1) {
       const x = document.createElement("button");
       x.textContent = "✕"; x.title = "Remove this split"; x.className = "close";
-      x.onclick = () => { panes.splice(i, 1); saveSettings({ panes }); render(); };
+      x.onclick = () => { list.splice(i, 1); savePanes(list); render(); };
       bar.appendChild(x);
     }
-    const list = document.createElement("div");
-    list.className = "list";
-    const kinds = kindsOf(pane.tab) || TABS.All;
-    for (const m of log.filter(m => kinds.has(m.kind)).slice(-200)) list.appendChild(line(m));
-    el.append(bar, list);
-    if (pane.tab === "Guild" && guild) {  // typing to the guild: its Discord channel and every member's Guild tab
+    const msgs = document.createElement("div");
+    msgs.className = "list";
+    for (const m of log.filter(m => shows(pane.tab, m) && !leftOut(m)).slice(-200)) msgs.appendChild(line(m));
+    el.append(bar, msgs);
+    if (pane.tab === "Guild" && settings.guildCode) {  // typing to the guild: its Discord channel and every member's Guild tab
       const input = document.createElement("input");
-      input.className = "say"; input.placeholder = settings.gameName || settings.login
+      input.className = "say";
+      input.placeholder = !MAIN ? "Type in the main chat window" : settings.gameName || settings.login
         ? "Type to the guild, Enter to send" : "Put your character's name in Settings to type here";
+      input.disabled = !MAIN;
       input.value = draft;
       input.oninput = () => { draft = input.value; };
       input.onkeydown = async e => {
-        if (e.key !== "Enter" || !input.value.trim()) return;
+        if (e.key !== "Enter" || !input.value.trim() || !guild) return;
         const why = await guild.sayChat(input.value);
         if (why) extraStatus(why); else { input.value = draft = ""; }
       };
@@ -339,14 +423,13 @@ function render() {
     host.appendChild(el);
   });
   // to the newest, once every pane is in (a pane alone is taller, and its scroll would be cut short)
-  host.querySelectorAll(".list").forEach((list, i) => { if (stuck[i] !== false) list.scrollTop = list.scrollHeight; });
+  host.querySelectorAll(".list").forEach((l, i) => { if (stuck[i] !== false) l.scrollTop = l.scrollHeight; });
   const say = host.querySelector(".say");
-  if (typing && say) { say.focus(); say.setSelectionRange(draft.length, draft.length); }  // (on the page by now)
+  if (typing && say) { say.focus(); say.setSelectionRange(draft.length, draft.length); }
 }
 
 function dragDivider(e, i) {
-  const panes = settings.panes?.length ? settings.panes : [{ tab: "Mega", grow: 1 }, { tab: "All", grow: 2 }];
-  const els = [...document.querySelectorAll(".pane")], a = els[i - 1], b = els[i];
+  const list = panes(), els = [...document.querySelectorAll(".pane")], a = els[i - 1], b = els[i];
   const ha = a.offsetHeight, hb = b.offsetHeight, y0 = e.clientY;
   const move = ev => {
     const d = Math.max(-ha + 40, Math.min(hb - 40, ev.clientY - y0));
@@ -354,23 +437,33 @@ function dragDivider(e, i) {
   };
   const up = () => {
     removeEventListener("pointermove", move); removeEventListener("pointerup", up);
-    els.forEach((el, k) => { panes[k] = { ...panes[k], grow: el.offsetHeight }; });
-    saveSettings({ panes });
+    els.forEach((el, k) => { list[k] = { ...list[k], grow: el.offsetHeight }; });
+    savePanes(list);
   };
   addEventListener("pointermove", move); addEventListener("pointerup", up);
 }
 
 function split() {
-  const panes = settings.panes?.length ? settings.panes : [{ tab: "Mega", grow: 1 }, { tab: "All", grow: 2 }];
-  if (panes.length >= 5) return;
-  panes.unshift({ tab: "Whisper", grow: 1 });
-  saveSettings({ panes });
+  const list = panes();
+  if (list.length >= 5) return;
+  list.unshift({ tab: "Whisper", grow: 1 });
+  savePanes(list);
   render();
+}
+
+function newWindow() {  // another chat window: the same chat, its own tabs and splits
+  const n = Math.max(1, ...Object.keys(settings.windows || {}).map(Number).filter(Boolean)) + 1;
+  window.open(`chat.html?w=${n}`, `ccc-chat-${n}`, "popup,width=520,height=380");
 }
 
 function status(text) {
   $("#status").dataset.main = text;
   $("#status").textContent = text + (extraNote ? "  ·  " + extraNote : "");
+}
+function warn(text) {
+  const el = $("#warn");
+  el.hidden = !text; el.textContent = text ? "⚠ " + text : "";
+  el.onclick = () => { el.hidden = true; saveSettings({ dismissed: rowsSeen }); };
 }
 
 // ---------------------------------------------------------------- start
@@ -378,15 +471,27 @@ function status(text) {
 $("#share").onclick = share;
 $("#pick").onclick = pickRegion;
 $("#split").onclick = split;
+$("#window").onclick = newWindow;
 $("#clear").onclick = () => { log = []; keepLog(); render(); };
-onSettings(() => { startExtras(); render(); });
+addEventListener("storage", e => {  // another window's messages (an extra window shows the main one's)
+  if (e.key === "ccc.log" && !MAIN) { log = loadLog(); render(); }
+});
+onSettings(() => { startExtras(); loadWatcher(); render(); });
+document.title = MAIN ? "CustomClassic Chat" : `CustomClassic Chat (${WIN})`;
 showStart();
 startExtras();
+loadWatcher();
 render();
-status("Loading text recognition…");
-R.loadModel().then(() => {
-  status("Ready. Click Share game window and pick MapleStory's window.");
-  setInterval(readOnce, 250);
-  setInterval(findChat, 3000);
-  setTimeout(findChat, 800);
-}).catch(e => status("Couldn't load text recognition: " + e.message));
+filterNote();
+if (MAIN) {
+  status("Loading text recognition…");
+  R.loadModel().then(() => {
+    status("Ready. Click Share game window and pick MapleStory's window.");
+    setInterval(readOnce, 250);
+    setInterval(findChat, 3000);
+    setTimeout(findChat, 800);
+  }).catch(e => status("Couldn't load text recognition: " + e.message));
+} else {
+  status("An extra window: it shows what the main chat window reads.");
+  $("#filter").hidden = true;
+}

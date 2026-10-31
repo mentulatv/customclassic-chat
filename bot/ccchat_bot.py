@@ -138,7 +138,7 @@ def login_link(key, user_id: str, name: str, server_id: str, now: float | None =
     return f"http://127.0.0.1:{gr.LOGIN_PORT}/login?t={token}"
 
 
-WEBSITE = "https://ccc.mentula.tv"
+WEBSITE = "https://customclassic.chat"
 
 
 def web_login_link(link: str) -> str:
