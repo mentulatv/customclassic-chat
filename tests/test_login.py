@@ -1,21 +1,18 @@
 """Logins from the bot's magic link, and typing in the Guild tab."""
 import queue
-import sys
 import threading
 import time
 import urllib.error
 import urllib.request
-from pathlib import Path
 
+from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "bot"))
-import ccchat_bot as bot  # noqa: E402
-import customclassic_chat as mc  # noqa: E402
-import guild_relay as g  # noqa: E402
+import customclassic_chat as mc
+import guild_relay as g
 
 KEY = Ed25519PrivateKey.generate()
-PUBLIC = bot.public_key_text(KEY)
+PUBLIC = g._b64(KEY.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw))  # as the bot gives it
 
 
 def login(name="Rowan", server="555", days=1, key=KEY):
@@ -31,10 +28,6 @@ def test_only_the_bots_own_logins_count():
     forged = g._b64(b'{"uid":"1","name":"Admin","server":"555","exp":9999999999}')
     assert g.check_login(forged + "." + sig, PUBLIC) is None  # the name changed after signing
     assert g.check_login("junk", PUBLIC) is None and g.check_login(login(), "") is None
-    link = bot.login_link(KEY, "1", "Rowan", "555")
-    web = bot.web_login_link(link)  # the same login, for the website, after the #
-    assert web.startswith("https://customclassic.chat/#login=") and web.split("=", 1)[1] == link.split("t=", 1)[1]
-    assert link.startswith("http://127.0.0.1:47321/login?t=") and g.check_login(link.split("t=")[1], PUBLIC)
 
 
 def peers(cfg=None):

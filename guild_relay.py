@@ -38,7 +38,7 @@ from dataclasses import dataclass, field
 from rapidfuzz import fuzz
 
 BROKERS = [("broker.emqx.io", 8883), ("broker.hivemq.com", 8883)]  # free public MQTT brokers, over TLS
-# the shared CustomClassic Chat bot (bot/ccchat_bot.py): its public application id, for its invite link,
+# the shared CustomClassic Chat bot (ccchat_bot.py, in the customclassic-server project): its public application id, for its invite link,
 # and the public half of the key it signs logins with (/chatlink), for every app to check them
 SHARED_BOT_ID = "1564435368072192102"
 SHARED_BOT_KEY = "3e9sP7ifaw8Yi7safdCydoBAuGHuqjlRx_7Tmm748s4"
