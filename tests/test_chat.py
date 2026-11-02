@@ -166,7 +166,11 @@ def test_system_lines_and_popups():
     assert mc.kind_of(notice("[16:59] You have left the party.", band=True, bg=(40, 32, 30)), backgrounds) == "system"
     assert mc.kind_of(notice("[14:31][Friend] SoulSlayerX has logged in."), backgrounds) == "system"
     assert mc.kind_of(notice("[14:31] [Notice] Please beware of scams"), backgrounds) is None
-    assert mc.kind_of(notice("X obtained a Gachapon prize", band=True, bg=(150, 68, 55)), backgrounds) is None
+    assert mc.kind_of(notice("X obtained a Gachapon prize", band=True, bg=(150, 68, 55)), backgrounds) == "announce"
+    [m] = mc.messages_from([SimpleNamespace(text="[03:10] WilliamZh obtained [Chocolate Ribbon] from the Aurora Mystery "
+                                                 "Fashion Crate! Congrats!", source="notice", band=True, bg=(151, 66, 57),
+                                            color=(255, 255, 255))], mc.Dedupe(), 1000.0, ({}, backgrounds))
+    assert (m["kind"], m["name"], m["bg"]) == ("mega", "", "#974239") and m["body"].startswith("WilliamZh obtained [Chocolate Ribbon]")  # with the megaphones
     [m] = mc.messages_from([SimpleNamespace(text="[16:59] You have left the party.", source="notice", band=True,
                                             bg=(40, 32, 30), color=(224, 188, 175))],
                            mc.Dedupe(), 1000.0, ({"notice": [[255, 175, 175], [255, 255, 0]]}, backgrounds))

@@ -277,14 +277,18 @@ def kind_of(line, backgrounds: dict | None = None) -> str | None:
     unknown but that sits on a solid band is a megaphone. A known chat colour wins over the
     band: map chat over a plain stretch of the game scene looks like a band too. System lines
     ("You have left the party.", "[Friend] X has logged in.") are kept; the "[Notice] beware of
-    scams" broadcasts and the gachapon announcements on their red band are left out."""
+    scams" broadcasts are left out. The gachapon and crate prizes on their red band ("X obtained
+    [item] from …") are "announce": items for the market, shown with the megaphones. Their white
+    text reads as map chat and covers so much of the band that it may not count as one: the red
+    decides."""
     src = line.source
+    red = (backgrounds or {}).get("notice")
+    near = _closest(line.bg, red) if red and getattr(line, "bg", None) else None
+    if near and sum((a - b) ** 2 for a, b in zip(line.bg, near)) ** 0.5 < 30 and \
+            "[notice]" not in line.text.lower().replace(" ", ""):
+        return "announce"
     if src == "notice":
         if "[notice]" in line.text.lower().replace(" ", ""):
-            return None
-        red = (backgrounds or {}).get("notice")
-        if line.band and red and line.bg and _closest(line.bg, red) and \
-                sum((a - b) ** 2 for a, b in zip(line.bg, _closest(line.bg, red))) ** 0.5 < 45:
             return None
         return "system"
     if src in MEGAPHONES:
@@ -385,7 +389,7 @@ def style_for(line, kind: str, colors: dict, backgrounds: dict) -> tuple[str | N
     src = line.source
     fg = _closest(line.color, colors[src]) if src in colors else line.color
     bg = None
-    if kind == "mega" and line.band:
+    if kind == "mega" and (line.band or src not in MEGAPHONES):  # (a prize's red band may not count as one)
         bg = _closest(line.bg, backgrounds[src]) if src in backgrounds else line.bg
     return (hex_color(fg) if fg else None), (hex_color(bg) if bg else None)
 
@@ -404,10 +408,11 @@ def messages_from(lines, dedupe: Dedupe, now: float, palette: tuple[dict, dict] 
         if not kind:
             continue
         p = parse(ln.text, loose=kind == "mega")
-        if kind == "system":  # no speaker: the line itself, without its time stamp
+        if kind in ("system", "announce"):  # no speaker: the line itself, without its time stamp
             m = stamp.match(ln.text.strip())
             body = ln.text.strip()[m.end():].strip()
             p = {"name": "", "body": body, "sep": "", "time": real_time(m["time"])} if body else None
+            kind = "mega" if kind == "announce" else kind
         if p:
             p["body"] = clean_body(kind, p["body"], ignore)
             # (a megaphone sits on its own band, which the scene can't fake: a garbled stamp is fine)
