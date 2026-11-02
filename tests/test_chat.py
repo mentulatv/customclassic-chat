@@ -23,6 +23,11 @@ def test_parse_chat_lines():
     # a megaphone's channel badge sits between the name and the colon
     assert mc.parse("[21:17]Tarvin CH22 : S> 60% earring INT") is None
     assert mc.parse("[21:17]Tarvin CH22 : S> 60% earring INT", loose=True)["name"] == "Tarvin"
+    # OCR slips seen in the game: the [ read twice, the colon after the badge lost
+    assert mc.parse("[[03:10]Cams CH11- : S> pink earring", loose=True)["time"] == "03:10"
+    p = mc.parse("[03:09] jp604 CHOS [Emerald Earrings] S C.O 1.4M", loose=True)
+    assert (p["name"], p["body"]) == ("jp604", "[Emerald Earrings] S C.O 1.4M")
+    assert mc.parse("[03:09] jp604 CHOS [Emerald Earrings] S C.O 1.4M") is None
 
 
 def test_what_goes_where():

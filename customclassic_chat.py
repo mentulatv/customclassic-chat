@@ -144,13 +144,14 @@ HK_ADJUST_KEY, ADJUST_VK = 5, 0x74  # Ctrl+Alt+F5 move and resize: only when swi
 RECHECK_S = 5  # seconds between looks at whether the game's chat was resized
 HK_EDIT, HK_HIDE, HK_QUIT, HK_FIT = 1, 2, 3, 4
 
-# [21:16], and OCR's "[21:16j", "16 : 39]" (the [ lost)
-_STAMP = r"^[^\w\[({]{0,3}(?:(?:[\[({]\s?)?(?P<time>\d{1,2}\s?[:.;]\s?\d{2})\s?[\])}jlI|1]?)?\s*"
+# [21:16], and OCR's "[21:16j", "16 : 39]" (the [ lost), "[[03:10]" (the [ read twice)
+_STAMP = r"^[^\w\[({]{0,3}(?:(?:[\[({]\s?){0,2}(?P<time>\d{1,2}\s?[:.;]\s?\d{2})\s?[\])}jlI|1]?)?\s*"
 _NAME = r"(?P<name>(?=[A-Za-z0-9]*[A-Za-z])[A-Za-z0-9]{2,13})"  # at least one letter: "16" of a lost "[16:39]" isn't one
 _MSG = re.compile(_STAMP + r"(?:\[[^\]]{1,25}\]\s*)?"                                       # a medal
                   + _NAME + r"\s*(?:\[(?P<where>[^\]]{1,24})\]\s*)?"  # a whisper's world-channel: "Name[Windia-15]>> hi"
                   + r"(?P<sep><<|>>|«|»|[:;])\s?(?P<body>.*)$")
-_LOOSE = re.compile(_STAMP + _NAME + r"[^:;]{0,14}[:;]\s?(?P<body>.*)$")  # "Tarvin CH22 : S> ..."
+# "Tarvin CH22 : S> ...", or the channel badge alone when the colon is lost: "jp604 CHOS [Emerald Earrings] S> ..."
+_LOOSE = re.compile(_STAMP + _NAME + r"(?:[^:;]{0,14}[:;]|\s*CH\s?[0-9OoSIl|]{1,2}(?=\s))\s?(?P<body>.*)$")
 
 
 # ------------------------------------------------------------------ what goes where
