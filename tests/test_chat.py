@@ -236,13 +236,11 @@ def test_time_stamps_and_history(tmp_path):
     assert mc.line_text(m) == "[18:16:05] Hollo : JPT"
     assert mc.line_text(m, "minutes") == "[18:16] Hollo : JPT"
     assert mc.line_text(m, "off") == "Hollo : JPT"
-    path = tmp_path / "h.jsonl"
+    folder = tmp_path / "log"
     for hours_ago in (30, 13, 2, 0):
-        mc.save_message(path, dict(m, at=at - hours_ago * 3600, body=f"{hours_ago}h"))
-    assert [x["body"] for x in mc.load_history(path, 12, at)] == ["2h", "0h"]  # the default 12 hours
-    assert len(mc.load_history(path, 0, at)) == 4  # forever
-    mc.prune_history(path, 12, at)
-    assert [x["body"] for x in mc.load_history(path, 0, at)] == ["2h", "0h"]
+        mc.save_message(folder, dict(m, at=at - hours_ago * 3600, body=f"{hours_ago}h"))
+    assert [p.stem for p in mc.log_days(folder)] == ["2026-10-26", "2026-10-25"]  # a file a day, newest first
+    assert [x["body"] for x in mc.load_log(folder, at - 14 * 3600, at)] == ["13h", "2h", "0h"]
     log = mc.ChatLog()
     log.add(dict(m, kind="mega"))
     assert log.unread["Mega"]  # on All, megaphones aren't shown: Mega gets a red dot
@@ -555,3 +553,48 @@ def test_a_short_or_closed_game_chat_is_noticed():
     r = mc.anchored({"left": 100, "top": 500, "width": 400, "height": 160}, 16, 18)
     assert 506 <= r["top"] <= 512 and r["top"] + r["height"] == 660 and r["width"] == 418
 
+
+
+def test_old_history_moves_into_the_chat_log(tmp_path):
+    old, folder = tmp_path / "chat_history.jsonl", tmp_path / "log"
+    old.write_text('{"kind": "map", "name": "A", "body": "hi", "at": 1793600000, "to": null}\nnot json\n', encoding="utf-8")
+    mc.migrate_history(old, folder)
+    assert not old.exists() and [x["body"] for p in mc.log_days(folder) for x in mc.read_jsonl(p)] == ["hi"]
+
+
+def test_sessions(tmp_path):
+    path, t = tmp_path / "runs.json", 1_000_000.0
+    assert mc.Sessions(path, t).earlier() is None  # the first run
+    s = mc.Sessions(path, t + 600)  # 10 minutes after: a quick restart (the first run's last beat was at its start)
+    assert s.earlier() == (t, t, True)
+    s.beat(t + 3600)
+    s = mc.Sessions(path, t + 3600 + 60)  # quick again: the session is both runs before
+    assert s.earlier() == (t, t + 3600, True)
+    s.beat(t + 7200)
+    s = mc.Sessions(path, t + 7200 + 2 * 86400)  # two days later: a new session, the earlier one waits for a click
+    assert s.earlier() == (t, t + 7200, False)
+    s = mc.Sessions(path, t + 7200 + 2 * 86400 + 60)
+    assert s.earlier()[0] == t + 7200 + 2 * 86400  # just the last session, not the one before the break
+
+
+def test_earlier_session_in_the_chat():
+    now = 1_000_000.0
+    old = [{"kind": "mega", "name": "A", "body": "S> hat", "at": now - 7200, "to": None},
+           {"kind": "map", "name": "B", "body": "hi", "at": now - 7100, "to": None}]
+    offer = mc.earlier_offer(old, now - 7100, now)
+    assert offer["kind"] == "earlier" and offer["body"].startswith("Earlier chat: 2 messages")
+    log = mc.ChatLog()
+    log.messages.extend([offer, {"kind": "map", "name": "C", "body": "new", "at": now, "to": None}])
+    assert [m["kind"] for m in log.visible()] == ["earlier", "map"]  # the offer shows in every tab
+    log.select("Mega")
+    assert [m["kind"] for m in log.visible()] == ["earlier"]
+    mixed = mc.with_earlier(old, list(log.messages), now - 7100, now)
+    assert [m["kind"] for m in mixed] == ["mega", "map", "divider", "map"] and mixed[0]["earlier"]
+    assert mixed[2]["body"] == "── earlier session, ended 1 hour ago ──"
+    log.messages.clear()
+    log.messages.extend(mixed)
+    assert [m["body"] for m in log.visible()] == ["S> hat", mixed[2]["body"]]
+    log.select("Whisper")
+    assert log.visible() == []  # nothing earlier here: no divider either
+    assert mc.line_text(mixed[2]) == mixed[2]["body"]
+    assert mc.dimmed("#ffffff", "#000000") == "#7f7f7f"

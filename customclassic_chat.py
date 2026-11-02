@@ -54,7 +54,6 @@ DEFAULTS = {
     "min_lines": 3,           # fewer lines in the game's chat (minimised, one or two): megaphones arriving together
                               # may scroll away unread, and a quiet ⚠ shows until clicked
     "history": 20000,         # messages kept in memory at most
-    "keep_hours": 12,         # chat history kept between restarts, in hours; 0 keeps it forever
     "timestamps": "seconds",  # "seconds" [18:16:05], "minutes" [18:16] or "off"
     "opacity": 1.0,           # the panel's opacity when ◐ is off
     "solid_text": True,       # below full opacity only the background fades: the text stays solid, with a shadow
@@ -105,7 +104,8 @@ CUSTOM_KINDS = [("map", "Map chat"), ("whisper", "Whispers"), ("party", "Party")
                 ("twitch", "Twitch chat"), ("discord", "Discord"),
                 ("mega", "Megaphones"), ("system", "System messages"), ("watch", "Watch list catches")]
 COLORS = {"guild": "#c8b4ff", "discord": "#8ea1f0", "guildsay": "#9fe3b8", "twitch": "#bf94ff", "map": "#ffffff", "whisper": "#00ff00", "party": "#ff8fc7", "buddy": "#ff9900", "other": "#c8d2e4",
-          "mega": "#f2a7cf", "system": "#ffafaf", "status": "#ffc24b"}  # the game's own where measured; notes in amber
+          "mega": "#f2a7cf", "system": "#ffafaf", "status": "#ffc24b",
+          "earlier": "#ffc24b", "divider": "#8f9db5"}  # the game's own where measured; notes in amber
 # the game's own pop-ups that appear over the chat box: CustomClassic Chat steps aside while one is up
 POPUP = re.compile(r"(?i)\b(?:party|guild|alliance|family)\s+invit\w*\s+from\b|\b(?:trade|friend|buddy)\s+request\s+from\b"
                    r"|\binvited\s+you\b")
@@ -441,6 +441,8 @@ STAMP_FORMATS = {"seconds": "%H:%M:%S", "minutes": "%H:%M", "off": None}
 def line_text(msg: dict, stamps: str = "seconds") -> str:
     """A message as one chat line. The time is CustomClassic Chat's own clock when the line was read,
     so it's there even when the game shows no time stamps."""
+    if msg["kind"] in EXTRA_KINDS:
+        return msg["body"]
     who = msg["name"]
     if msg["kind"] == "whisper":
         who = f"{'To' if msg['to'] else 'From'} {msg['name']}" + (f" (ch {msg['ch']})" if msg.get("ch") else "")
@@ -449,24 +451,15 @@ def line_text(msg: dict, stamps: str = "seconds") -> str:
     return f"[{time.strftime(fmt, time.localtime(msg['at']))}] {text}" if fmt else text
 
 
-HISTORY_FILE = HERE / "chat_history.jsonl"
+HISTORY_FILE = HERE / "chat_history.jsonl"  # before 2.1: the chat of the last hours, in one file
+LOG_DIR = HERE / "chat log"                  # everything read, one file a day, kept for good
+RUNS_FILE = CACHE_DIR / "runs.json"          # when the app ran
+BREAK_S = 30 * 60  # closed this long: the next start is a new session, and its chat starts empty
+EXTRA_KINDS = {"earlier", "divider"}  # lines of the chat window's own: in every tab, never saved
 
 
-def load_history(path: Path, keep_hours: float, now: float) -> list[dict]:
-    """Messages saved by earlier runs, within the kept hours (all of them when keep_hours is 0)."""
-    out = []
-    try:
-        with open(path, encoding="utf-8") as fh:
-            for line in fh:
-                try:
-                    m = json.loads(line)
-                except ValueError:
-                    continue
-                if not keep_hours or now - m.get("at", 0) <= keep_hours * 3600:
-                    out.append(m)
-    except OSError:
-        pass
-    return out
+def log_file(folder: Path, at: float) -> Path:
+    return folder / f"{time.strftime('%Y-%m-%d', time.localtime(at))}.jsonl"
 
 
 def write_atomic(path: Path, text: str) -> None:
@@ -476,19 +469,137 @@ def write_atomic(path: Path, text: str) -> None:
     tmp.replace(path)
 
 
-def prune_history(path: Path, keep_hours: float, now: float) -> None:
-    """Drop saved messages older than the kept hours (nothing when they're kept forever)."""
-    if keep_hours and path.exists():
-        kept = load_history(path, keep_hours, now)
-        write_atomic(path, "".join(json.dumps(m) + "\n" for m in kept))
-
-
-def save_message(path: Path, msg: dict) -> None:
+def save_message(folder: Path, msg: dict) -> None:
     try:
-        with open(path, "a", encoding="utf-8") as fh:
+        folder.mkdir(exist_ok=True)
+        with open(log_file(folder, msg["at"]), "a", encoding="utf-8") as fh:
             fh.write(json.dumps(msg) + "\n")
     except OSError:
         pass
+
+
+def read_jsonl(path: Path) -> list[dict]:
+    out = []
+    try:
+        with open(path, encoding="utf-8") as fh:
+            for line in fh:
+                try:
+                    out.append(json.loads(line))
+                except ValueError:
+                    continue
+    except OSError:
+        pass
+    return out
+
+
+def log_days(folder: Path) -> list[Path]:
+    """The chat log's day files, newest first."""
+    return sorted(folder.glob("????-??-??.jsonl"), reverse=True) if folder.exists() else []
+
+
+def load_log(folder: Path, since: float, until: float) -> list[dict]:
+    """The messages read between the two times, oldest first."""
+    first, last = log_file(folder, since).name, log_file(folder, until).name
+    out = []
+    for path in reversed(log_days(folder)):
+        if first <= path.name <= last:
+            out += [m for m in read_jsonl(path) if since <= m.get("at", 0) <= until]
+    return out
+
+
+def migrate_history(old: Path, folder: Path) -> None:
+    """The one history file of earlier versions, into the chat log's day files."""
+    if not old.exists():
+        return
+    for m in read_jsonl(old):
+        if m.get("at"):
+            save_message(folder, m)
+    old.unlink()
+
+
+class Sessions:
+    """When the app ran (a start and a last-seen time a run, beaten every minute while it runs):
+    to tell a quick restart, whose chat carries on, from a new session after a break."""
+
+    def __init__(self, path: Path, now: float, keep: int = 50):
+        self.path, self.start, self.keep = path, now, keep
+        try:
+            self.runs = [r for r in json.loads(path.read_text(encoding="utf-8")) if len(r) == 2][-keep:]
+        except (OSError, ValueError, TypeError):
+            self.runs = []
+        self.runs.append([now, now])
+        self.save()
+
+    def save(self) -> None:
+        try:
+            self.path.parent.mkdir(exist_ok=True)
+            write_atomic(self.path, json.dumps(self.runs[-self.keep:]))
+        except OSError:
+            pass
+
+    def beat(self, now: float) -> None:
+        self.runs[-1][1] = now
+        self.save()
+
+    def earlier(self) -> tuple[float, float, bool] | None:
+        """The session before this run: (its start, its end, whether this run carries it on
+        because it started within BREAK_S). A session is runs each started within BREAK_S of
+        the last one's end."""
+        before = self.runs[:-1]
+        if not before:
+            return None
+        since, until = before[-1]
+        for a, b in reversed(before[:-1]):
+            if since - b > BREAK_S:
+                break
+            since = a
+        return since, until, self.start - until <= BREAK_S
+
+
+def ago(seconds: float) -> str:
+    """'5 minutes ago', '3 hours ago', '2 days ago'."""
+    m = int(seconds // 60)
+    if m < 2:
+        return "just now"
+    if m < 60:
+        return f"{m} minutes ago"
+    h = m // 60
+    if h < 48:
+        return f"{h} hour{'s' if h > 1 else ''} ago"
+    return f"{h // 24} days ago"
+
+
+def when(at: float, now: float) -> str:
+    """'23:40', 'yesterday 23:40' or '31 Oct 23:40'."""
+    day = lambda t: time.strftime("%Y-%m-%d", time.localtime(t))
+    hm = time.strftime("%H:%M", time.localtime(at))
+    if day(at) == day(now):
+        return hm
+    if day(at) == day(now - 86400):
+        return f"yesterday {hm}"
+    return time.strftime("%d %b ", time.localtime(at)).lstrip("0") + hm
+
+
+def earlier_offer(messages: list[dict], until: float, now: float) -> dict:
+    """The line that stands for an earlier session's chat after a break: click it to show it."""
+    n = len(messages)
+    return {"kind": "earlier", "name": "", "body": f"Earlier chat: {n} message{'s' if n != 1 else ''}, until "
+            f"{when(until, now)} · click to show", "at": until, "to": None}
+
+
+def with_earlier(messages: list[dict], current, until: float, now: float) -> list[dict]:
+    """An earlier session's chat (dimmed when drawn), a divider, then this session's."""
+    if not messages:
+        return [m for m in current if m["kind"] != "earlier"]
+    divider = {"kind": "divider", "name": "", "body": f"── earlier session, ended {ago(now - until)} ──",
+               "at": until, "to": None}
+    return [dict(m, earlier=True) for m in messages] + [divider] + [m for m in current if m["kind"] != "earlier"]
+
+
+def dimmed(color: str, toward: str, keep: float = 0.5) -> str:
+    """A colour faded toward the background: an earlier session's lines."""
+    a, b = (tuple(int(c[i:i + 2], 16) for i in (1, 3, 5)) for c in (color, toward))
+    return hex_color([x * keep + y * (1 - keep) for x, y in zip(a, b)])
 
 
 def custom_name(custom: dict | None) -> str | None:
@@ -569,8 +680,9 @@ class ChatLog:
         self.tab, self.unread[tab] = tab, False
 
     def visible(self) -> list[dict]:
-        kinds = self.kinds() - self.hidden
-        return [m for m in self.messages if shows(kinds, m) and m.get("padded") not in self.hide_padded]
+        kinds = (self.kinds() - self.hidden) | EXTRA_KINDS
+        out = [m for m in self.messages if shows(kinds, m) and m.get("padded") not in self.hide_padded]
+        return out[1:] if out and out[0]["kind"] == "divider" else out  # nothing earlier in this tab
 
 
 # ------------------------------------------------------------------ where the panel goes
@@ -1333,7 +1445,7 @@ def read_loop(app) -> None:
     import reader as core
     cfg = core.Config.load()
     reader, dedupe, palette = core.Reader(cfg), Dedupe(), (cfg.colors, cfg.backgrounds)
-    dedupe.seed(list(app.log.messages), time.time())  # what the game's chat still shows from before a restart
+    dedupe.seed(list(app.log.messages) + (app.earlier[0] if app.earlier else []), time.time())  # what the game's chat still shows from before a restart
     capture, hwnd, last_error = None, None, ""
     last_check, tops, watch, lost = time.time(), deque(maxlen=6), CoverWatch(), 0
     last_name, names = 0.0, deque(maxlen=3)  # the character's name: the same in the last reads wins
@@ -1667,18 +1779,24 @@ class OverlayPane:
             shown, warn_h = [], bottom - top
         self.warn_band = top + warn_h
         y, fits = bottom - 2 - self.input_height(), 0
+        self.spots = []  # (top, bottom) of the line that shows the earlier session
+        back = self.opts["panel_bg"] or PANEL
         for m in reversed(shown[:max(0, end)]):
             star = "★ " if m.get("watch") and self.log.tab != "Watch" else ""
+            fg = self.opts["colors"].get(m["kind"]) or m.get("fg") or COLORS[m["kind"]]
             t = fc.create_text(pad, 0, anchor="nw", text=star + line_text(m, self.opts["timestamps"]),
-                               fill=self.opts["colors"].get(m["kind"]) or m.get("fg") or COLORS[m["kind"]],
+                               fill=dimmed(fg, back) if m.get("earlier") else fg,
                                font=app.font, width=w - 2 * pad - b)
             th = fc.bbox(t)[3]
             if y - th < top + warn_h:  # no room for all of it: the pane ends here
                 fc.delete(t)
                 break
             fc.move(t, 0, y - th)
+            if m["kind"] == "earlier":
+                self.spots.append((y - th, y))
             if m.get("bg"):  # a megaphone's band, as the game draws it: solid with its text, which is dark
-                fc.tag_lower(fc.create_rectangle(0, y - th, w - b - 1, y, fill=m["bg"], outline=""), t)
+                bg = dimmed(m["bg"], back) if m.get("earlier") else m["bg"]
+                fc.tag_lower(fc.create_rectangle(0, y - th, w - b - 1, y, fill=bg, outline=""), t)
             elif solid:  # a shadow, so solid text reads over whatever shows through behind it
                 shade = fc.create_text(pad + 1, y - th + 1, anchor="nw", text=fc.itemcget(t, "text"), fill=SHADOW,
                                        font=app.font, width=w - 2 * pad - b)
@@ -1745,6 +1863,9 @@ class OverlayPane:
         w, b = self.frame.width, self.frame.bar_px
         if y < self.warn_band and x < w - b:
             self.frame.dismiss_warning()
+            return
+        if x < w - b and any(a <= y < z for a, z in getattr(self, "spots", ())):
+            self.app.show_earlier()
             return
         if x >= w - b:
             part = self.bar_hit(y)
@@ -2326,6 +2447,7 @@ class ChatFrame:
         if not app.adjusting() and self.movable():
             m.add_command(label="Move or resize…" + (" (Ctrl+Alt+F5)" if self.opts["adjust_hotkey"] else ""),
                           command=lambda: app.on_hotkey(HK_EDIT))
+        m.add_command(label="Chat log…", command=app.open_chat_log)
         m.add_command(label="Settings…", command=app.open_settings)
         if self.closable:
             m.add_separator()
@@ -2368,6 +2490,9 @@ class ChatPane:
         self.text.bind("<Configure>", lambda e: self.reading or self.text.see("end"))  # laid out, or resized
         for w in (self.text, self.bar):
             w.bind("<Button-3>", lambda e: win.menu(e, self))
+        self.text.tag_bind("earlier", "<Button-1>", lambda e: app.show_earlier())
+        self.text.tag_bind("earlier", "<Enter>", lambda e: self.text.configure(cursor="hand2"))
+        self.text.tag_bind("earlier", "<Leave>", lambda e: self.text.configure(cursor="arrow"))
         self.drawn = None
         self.reading = False  # scrolled up to read back: new messages keep the view where it is
 
@@ -2420,12 +2545,17 @@ class ChatPane:
         from_end = lines("end-1c") - lines("@0,0") if self.reading else None  # the line read, from the newest
         t.configure(state="normal", font=app.font, bg=app.opts["panel_bg"] or PANEL)
         t.delete("1.0", "end")
+        back = app.opts["panel_bg"] or PANEL
         for m in self.log.visible()[-NormalChat.MAX_SHOWN:]:
             fg = app.opts["colors"].get(m["kind"]) or m.get("fg") or COLORS[m["kind"]]
-            tag = f"{fg}|{m.get('bg') or ''}"
-            t.tag_configure(tag, foreground=fg, background=m.get("bg") or "")
+            bg = m.get("bg") or ""
+            if m.get("earlier"):
+                fg, bg = dimmed(fg, back), bg and dimmed(bg, back)
+            tag = f"{fg}|{bg}"
+            t.tag_configure(tag, foreground=fg, background=bg)
             star = "★ " if m.get("watch") and self.log.tab != "Watch" else ""
-            t.insert("end", star + line_text(m, app.opts["timestamps"]) + "\n", tag)
+            tags = (tag, "earlier") if m["kind"] == "earlier" else (tag,)
+            t.insert("end", star + line_text(m, app.opts["timestamps"]) + "\n", tags)
         t.configure(state="disabled")
         if from_end is None:  # the newest messages in view, as a chat does
             t.see("end")
@@ -2517,6 +2647,7 @@ class NormalChat:
             m.add_command(label="Remove this pane", command=lambda: self.remove(pane))
         m.add_cascade(label="New chat window", menu=app.new_window_menu(m))
         m.add_separator()
+        m.add_command(label="Chat log…", command=app.open_chat_log)
         m.add_command(label="Settings…", command=app.open_settings)
         m.add_separator()
         m.add_command(label="Close this window", command=lambda: app.close_normal(self))
@@ -2564,10 +2695,20 @@ class ChatPanel:
         if not isinstance(opts["hide_padded"], list):  # an on/off from before the kinds were told apart
             opts["hide_padded"] = [k for k, _ in PADDED_KINDS] if opts["hide_padded"] else []
         self.log.hide_padded = set(opts["hide_padded"])
-        if not demo:  # the chat from earlier runs, within the kept hours
+        self.sessions, self.earlier = None, None  # (the earlier session's messages, when it ended) until shown
+        if not demo:  # a quick restart carries on the earlier session's chat; after a break it waits for a click
             now = time.time()
-            prune_history(HISTORY_FILE, opts["keep_hours"], now)
-            self.log.messages.extend(load_history(HISTORY_FILE, opts["keep_hours"], now))
+            migrate_history(HISTORY_FILE, LOG_DIR)
+            self.sessions = Sessions(RUNS_FILE, now)
+            span = self.sessions.earlier()
+            if span:
+                since, until, quick = span
+                msgs = load_log(LOG_DIR, since, until + 120)[-opts["history"]:]  # (+ the minute between beats)
+                if quick:
+                    self.log.messages.extend(with_earlier(msgs, [], until, now))
+                elif msgs:
+                    self.earlier = (msgs, until)
+                    self.log.messages.append(earlier_offer(msgs, until, now))
         self.stop = threading.Event()
         self.game = None           # set here, read by the reading thread
         self.capture = None        # the game window's pictures, shared by the reading and tracking threads
@@ -2634,10 +2775,31 @@ class ChatPanel:
         self.root.after(300, self.follow)
         if not demo:
             self.root.after(40, self.watch_edge)
+            self.root.after(60000, self.beat)
         self.apply_see_through()
         self.render()
 
     # the chat windows, together ---------------------------------------------------------
+
+    def beat(self) -> None:
+        """Still running: a restart within BREAK_S of the last beat carries this session on."""
+        self.sessions.beat(time.time())
+        self.root.after(60000, self.beat)
+
+    def show_earlier(self) -> None:
+        """The earlier session's chat, dimmed above a divider, in place of the line that offered it."""
+        if not self.earlier:
+            return
+        msgs, until = self.earlier
+        self.earlier = None
+        mixed = with_earlier(msgs, list(self.log.messages), until, time.time())
+        self.log.messages.clear()  # (in place: the other windows' views share it)
+        self.log.messages.extend(mixed)
+        self.render()
+
+    def open_chat_log(self) -> None:
+        import log_window
+        log_window.open_window(self)
 
     def all_frames(self) -> list:
         return [self.main, *self.frames]
@@ -3031,7 +3193,7 @@ class ChatPanel:
                         for log in w.logs():
                             log.notice(data)
                     if not self.demo:
-                        save_message(HISTORY_FILE, data)
+                        save_message(LOG_DIR, data)
                     for p in self.overlay_panes():  # reading back: keep the same lines in view
                         if p.scroll and shows(p.log.kinds(), data):
                             p.scroll_to(p.scroll + 1)
@@ -3136,6 +3298,8 @@ class ChatPanel:
             self.user_hidden = not self.user_hidden
         elif hk == HK_QUIT:
             self.stop.set()
+            if self.sessions:
+                self.sessions.beat(time.time())
             if self.twitch:
                 self.twitch.stop()
             if self.relay:

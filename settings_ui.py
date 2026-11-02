@@ -525,28 +525,16 @@ class SettingsWindow:
         slider(c, see, 50, 95, set_see, "%").pack(fill="x")
 
     def chat_details(self, page) -> None:
-        """Finer choices for the chat: how long it's kept, which spacer lines, the right-click menu."""
+        """Finer choices for the chat: its log, which spacer lines, the right-click menu."""
         app, opts = self.app, self.opts
         from customclassic_chat import PADDED_KINDS
-        c = card(page, "History", "The chat is kept between restarts.")
+        c = card(page, "Chat log", "Everything read is saved, one file a day, and kept for good. Closed for more "
+                 "than 30 minutes, the chat starts empty: click the line at the top to show the earlier session.")
         row = tk.Frame(c, bg=CARD)
         row.pack(fill="x")
-        label(row, "Keep the last").pack(side="left")
-        hours = tk.StringVar(value=str(opts["keep_hours"] or 12))
-        forever = tk.BooleanVar(value=not opts["keep_hours"])
-
-        def set_keep(*_):
-            try:
-                h = max(1, int(float(hours.get())))
-            except ValueError:
-                return
-            app.set_opt("keep_hours", 0 if forever.get() else h)
-        tk.Spinbox(row, from_=1, to=720, width=5, textvariable=hours, command=set_keep, bg=FIELD, fg=INK,
-                   insertbackground=INK, buttonbackground=BORDER, relief="flat", highlightthickness=1,
-                   highlightbackground=BORDER, highlightcolor=ACCENT, font=(UI, 10)).pack(side="left", padx=6)
-        hours.trace_add("write", set_keep)
-        label(row, "hours").pack(side="left")
-        check(row, "Keep it forever", forever, set_keep).pack(side="left", padx=(18, 0))
+        import log_window
+        button(row, "Open the chat log", app.open_chat_log, primary=True).pack(side="left")
+        button(row, "Open the folder", log_window.open_folder).pack(side="left", padx=8)
 
         c = card(page, "Spacer lines", "Lines padded with spacers to fill the chat (@@@@@@): which kinds to leave out.")
         row = tk.Frame(c, bg=CARD)

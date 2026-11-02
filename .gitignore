@@ -16,3 +16,4 @@ dist/
 !docs/**
 crash.log
 errors.log
+chat log/
