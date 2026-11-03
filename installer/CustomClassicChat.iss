@@ -49,9 +49,10 @@ WizardSmallImageFile={#Pictures}\wizard_small.bmp,{#Pictures}\wizard_small_1.bmp
 Compression=lzma2/ultra64
 SolidCompression=yes
 LZMANumBlockThreads=4
-; a running copy is closed before its files are replaced, and started again after
+; a running copy is asked to quit before its files are replaced (PrepareToInstall below); anything
+; else still holding them (a problem report open) is offered to be closed by Windows' Restart Manager
 CloseApplications=yes
-RestartApplications=yes
+RestartApplications=no
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -78,6 +79,48 @@ Filename: "{app}\{#AppExe}"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags
 Filename: "{sys}\taskkill.exe"; Parameters: "/f /im {#AppExe}"; Flags: runhidden; RunOnceId: "CloseApp"
 
 [Code]
+const
+  EVENT_MODIFY_STATE = $0002;
+
+function OpenEvent(Access: DWORD; Inherit: BOOL; Name: String): THandle; external 'OpenEventW@kernel32.dll stdcall';
+function SetEvent(Event: THandle): BOOL; external 'SetEvent@kernel32.dll stdcall';
+function CloseHandle(Handle: THandle): BOOL; external 'CloseHandle@kernel32.dll stdcall';
+
+function AppRunning(): Boolean;
+begin
+  Result := CheckForMutexes('CustomClassicChatOverlay');  // the app holds it while it runs
+end;
+
+// A running copy closes before its files are replaced: asked to quit as its tray's Quit does
+// (it saves on the way out), and if it hasn't in five seconds (a version before 2.1.2 doesn't
+// listen for that), ended.
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  Event: THandle;
+  Waited, Code: Integer;
+begin
+  Result := '';
+  if not AppRunning() then
+    exit;
+  Event := OpenEvent(EVENT_MODIFY_STATE, False, 'CustomClassicChatQuit');
+  if Event <> 0 then
+  begin
+    SetEvent(Event);
+    CloseHandle(Event);
+  end;
+  Waited := 0;
+  while AppRunning() and (Waited < 50) do
+  begin
+    Sleep(100);
+    Waited := Waited + 1;
+  end;
+  if AppRunning() then
+  begin
+    Exec(ExpandConstant('{sys}\taskkill.exe'), '/f /im {#AppExe}', '', SW_HIDE, ewWaitUntilTerminated, Code);
+    Sleep(500);
+  end;
+end;
+
 // Uninstalling removes the program; the player's settings and chat log go only if they say so.
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var

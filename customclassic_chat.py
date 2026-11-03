@@ -820,6 +820,19 @@ def pointer_away(rect: tuple, pt: tuple) -> int:
     return max(left - pt[0], pt[0] - right, top - pt[1], pt[1] - bottom, 0)
 
 
+QUIT_EVENT = "CustomClassicChatQuit"  # the installer sets it to close a running copy before replacing its files
+
+
+def quit_when_asked(events: queue.Queue) -> None:
+    """Quit, as the tray's Quit does, once the installer asks (sets the named event)."""
+    import ctypes
+    k32 = ctypes.windll.kernel32
+    k32.CreateEventW.restype = ctypes.c_void_p
+    h = k32.CreateEventW(None, True, False, QUIT_EVENT)
+    if h and k32.WaitForSingleObject(ctypes.c_void_p(h), 0xFFFFFFFF) == 0:  # INFINITE; 0: WAIT_OBJECT_0
+        events.put(("hotkey", HK_QUIT))
+
+
 def close_menu_item(m) -> None:
     """The menu's first line closes it (choosing any line does), so there's no need to click the game to get rid of it."""
     m.add_command(label="✕ Close menu", command=lambda: None)
@@ -2791,6 +2804,7 @@ class ChatPanel:
             threading.Thread(target=login_listener, args=(self.events,), daemon=True).start()
             self.root.after(15000, self.check_updates)
         threading.Thread(target=overlay.hotkey_thread, args=(self.events, HOTKEYS), daemon=True).start()
+        threading.Thread(target=quit_when_asked, args=(self.events,), daemon=True).start()
         self.adjust_key_taken = False
         if opts["adjust_hotkey"]:
             self.take_adjust_key()
