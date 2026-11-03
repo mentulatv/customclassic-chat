@@ -29,6 +29,7 @@ Settings: chat.json holds the panel's place (relative to the game window) and th
 from __future__ import annotations
 
 import json
+import os
 import queue
 import re
 import sys
@@ -83,6 +84,7 @@ DEFAULTS = {
     "game_name": "",          # your character's name, as last read from the game's status bar: what you type goes under it
     "tab": "All",
     "settings_page": "Appearance",  # the settings section open last
+    "hide_unfocused": False,  # the chat overlays hide while another program is in front of the game
     "menu_close_s": 10,       # the right-click menu closes after this many seconds (0: stays until clicked away)
     "adjust_hotkey": False,   # Ctrl+Alt+F5 moves and resizes too (otherwise: right-click → Move or resize…)
     "update_check": True,     # ask GitHub now and then whether a newer version is out, and say so
@@ -818,6 +820,12 @@ def pointer_away(rect: tuple, pt: tuple) -> int:
     return max(left - pt[0], pt[0] - right, top - pt[1], pt[1] - bottom, 0)
 
 
+def close_menu_item(m) -> None:
+    """The menu's first line closes it (choosing any line does), so there's no need to click the game to get rid of it."""
+    m.add_command(label="✕ Close menu", command=lambda: None)
+    m.add_separator()
+
+
 def close_menu_when_left(open_: threading.Event, after_s: float = 10, far: int = 120, pointer=None) -> None:
     """While a right-click menu is open (open_ set): close it, as Escape would, once the pointer
     has moved well away from it (more than `far` pixels) or it has been up `after_s` seconds
@@ -885,6 +893,22 @@ def save_settings(opts: dict) -> None:
 
 
 # ------------------------------------------------------------------ the game window
+
+
+def in_front(game_hwnd: int) -> bool:
+    """The game, or one of this app's own windows (a menu, the settings, typing in the chat), is the
+    window in front: the one the keyboard goes to."""
+    import ctypes
+    import ctypes.wintypes as wt
+    user32 = ctypes.windll.user32
+    front = user32.GetForegroundWindow()
+    if not front:
+        return True  # nothing has it (a moment between windows): no reason to hide
+    if user32.GetAncestor(wt.HWND(front), 3) == user32.GetAncestor(wt.HWND(game_hwnd), 3):  # GA_ROOTOWNER
+        return True
+    pid = wt.DWORD()
+    user32.GetWindowThreadProcessId(wt.HWND(front), ctypes.byref(pid))
+    return pid.value == os.getpid()
 
 
 def game_geometry() -> dict | None:
@@ -2434,6 +2458,7 @@ class ChatFrame:
         import overlay
         app = self.app
         m = tk.Menu(self.front.root, tearoff=0, bg=PANEL, fg=INK, activebackground=TAB_ON, activeforeground=INK)
+        close_menu_item(m)
         if app.adjusting():  # moving and resizing: first, the way to finish
             m.add_command(label="✓ Done: keep it here", command=lambda: app.on_hotkey(HK_EDIT))
             m.add_separator()
@@ -2642,6 +2667,7 @@ class NormalChat:
         import tkinter as tk
         app = self.app
         m = tk.Menu(self.top, tearoff=0, bg=PANEL, fg=INK, activebackground=TAB_ON, activeforeground=INK)
+        close_menu_item(m)
         m.add_command(label="Split this window (a pane on top)", command=self.split)
         if pane is not self.panes[-1]:
             m.add_command(label="Remove this pane", command=lambda: self.remove(pane))
@@ -2689,6 +2715,7 @@ class ChatPanel:
         import overlay
         self.overlay, self.opts, self.demo = overlay, opts, demo
         self.always_show, self.verbose = always_show, verbose
+        self.away = 0  # since when another program has been in front of the game (Hide when the game isn't in front)
         self.events: queue.Queue = queue.Queue()
         self.log = ChatLog(opts["history"], opts["tab"], self.tabs())
         self.log.hidden = set() if opts["system_messages"] else {"system"}
@@ -3159,6 +3186,11 @@ class ChatPanel:
         # game window found then), everything hides. Unlocked, it isn't over the game's chat: nothing
         # to step aside for; while typing in it, or with the game's chat closed, it stays
         up = bool(game) or self.always_show
+        if game and self.opts["hide_unfocused"] and not main.edit and not in_front(game["hwnd"]):
+            self.away = self.away or time.time()
+            up = up and time.time() - self.away < 0.5  # (not for a flicker while switching windows)
+        else:
+            self.away = 0
         stays = unlocked or main.typing() or self.chat_closed
         aside = self.edge_held or time.time() < self.back_at  # the game chat being resized from its top edge
         main.show(bool(up and (rect or unlocked)) and not self.user_hidden and not (self.covered and not stays)

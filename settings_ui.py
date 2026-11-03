@@ -244,6 +244,9 @@ class SettingsWindow:
                 app.take_adjust_key()
         check(c, "Ctrl+Alt+F5 also moves and resizes (press it again to keep the place)", hotkey,
               set_hotkey).pack(fill="x", pady=(8, 0))
+        unfocused = tk.BooleanVar(value=self.opts["hide_unfocused"])
+        check(c, "Hide the chat while another program is in front of the game", unfocused,
+              lambda: app.set_opt("hide_unfocused", unfocused.get())).pack(fill="x")
 
         c = card(page, "Reset position",
                  "Lost the panel, or moved it off the chat by accident? This puts it back on the game's chat box. "
