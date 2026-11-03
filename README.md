@@ -22,7 +22,7 @@
 
 ## Download
 
-**[⬇ CustomClassicChat-setup.exe](https://github.com/mentulatv/customclassic-chat/releases/latest/download/CustomClassicChat-setup.exe)** (Windows 10/11)
+**[⬇ The installer, CustomClassicChat-x.y.z-setup.exe](https://github.com/mentulatv/customclassic-chat/releases/latest)** (Windows 10/11), under Assets on the latest release
 
 1. Run it: everything the app needs is inside, and it installs for you alone (no administrator).
 2. Run the game **windowed** or **borderless**, then CustomClassic Chat from the Start menu.

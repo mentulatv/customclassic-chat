@@ -1,6 +1,6 @@
 @echo off
 rem Builds dist\CustomClassicChat\ (the .exe version, nothing to install), dist\CustomClassicChat-win64.zip to share,
-rem and dist\CustomClassicChat-setup.exe, the Windows installer (needs Inno Setup 6: winget install JRSoftware.InnoSetup).
+rem and dist\CustomClassicChat-x.y.z-setup.exe, the Windows installer (needs Inno Setup 6: winget install JRSoftware.InnoSetup).
 cd /d "%~dp0"
 if not exist .venv\Scripts\python.exe call "%~dp0setup.bat"
 .venv\Scripts\python.exe -m pip install -q pyinstaller || (pause & exit /b 1)
@@ -33,4 +33,4 @@ if not exist "%ISCC%" (echo. & echo Built dist\CustomClassicChat-win64.zip ^(no 
 for /f %%v in ('.venv\Scripts\python.exe -c "import updates; print(updates.VERSION)"') do set VERSION=%%v
 "%ISCC%" /Q /DAppVersion=%VERSION% installer\CustomClassicChat.iss || (pause & exit /b 1)
 echo.
-echo Built dist\CustomClassicChat-win64.zip and dist\CustomClassicChat-setup.exe (%VERSION%)
+echo Built dist\CustomClassicChat-win64.zip and dist\CustomClassicChat-%VERSION%-setup.exe

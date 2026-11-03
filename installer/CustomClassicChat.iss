@@ -1,5 +1,5 @@
 ; The Windows installer: build.bat compiles it with Inno Setup 6 (ISCC /DAppVersion=x.y.z) into
-; dist\CustomClassicChat-setup.exe, from the same dist\CustomClassicChat folder as the zip.
+; dist\CustomClassicChat-x.y.z-setup.exe (its version in the name), from the same dist\CustomClassicChat folder as the zip.
 ;
 ; It installs for this Windows user only (no administrator needed), into
 ; %LOCALAPPDATA%\Programs\CustomClassic Chat: the app keeps its settings, cache and chat log next
@@ -38,7 +38,7 @@ MinVersion=10.0.18362
 LicenseFile=..\LICENSE
 InfoBeforeFile=disclaimer.txt
 OutputDir=..\dist
-OutputBaseFilename=CustomClassicChat-setup
+OutputBaseFilename=CustomClassicChat-{#AppVersion}-setup
 SetupIconFile=..\build\customclassic_chat.ico
 UninstallDisplayIcon={app}\{#AppExe}
 UninstallDisplayName={#AppName}
