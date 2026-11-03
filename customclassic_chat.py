@@ -835,7 +835,7 @@ def close_menu_when_left(open_: threading.Event, after_s: float = 10, far: int =
     u32 = ctypes.windll.user32
     u32.FindWindowW.restype = ctypes.c_void_p
 
-    def cursor():
+    def cursor(_rect=None):  # (the menu's rect: the tests' stand-in pointer uses it)
         pt = wt.POINT()
         u32.GetCursorPos(ctypes.byref(pt))
         return pt.x, pt.y
