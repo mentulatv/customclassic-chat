@@ -347,6 +347,63 @@ def find_game_window() -> dict | None:
 
 
 
+def chat_box_by_scrollbar(img: Image.Image) -> dict | None:
+    """The game's chat in a picture, found by its scrollbar (as the website does), for a chat
+    without time stamps: the left edge of the track is one unbroken run of neutral grey from the
+    top arrow down to the bottom one, with the blue arrow buttons beside it at both ends, and the
+    chat box's near-black frame line right below it. That gives the top, bottom and right of the
+    chat's lines; the left is where that frame line ends. {left, top, width, height} or None."""
+    a = np.asarray(img.convert("RGB"), dtype=np.int16)
+    h, w = a.shape[:2]
+    hi, lo = a.max(axis=2), a.min(axis=2)
+    grey = (hi - lo <= 10) & (lo >= 140)
+    blue = (a[:, :, 2] - a[:, :, 0] >= 40) & (a[:, :, 2] > a[:, :, 1])
+    even = hi - lo <= 12  # a neutral shade: the frame line, blended or not
+    shade = a.sum(axis=2) / 3
+
+    def frame_below(x: int, bottom: int):
+        for y in range(bottom + 1, min(h, bottom + 30)):
+            if x - 41 < 0 or not even[y, x - 1] or shade[y, x - 1] > 150:
+                continue
+            v = shade[y, x - 1]
+            if np.count_nonzero(even[y, x - 40:x] & (np.abs(shade[y, x - 40:x] - v) <= 20)) >= 38:
+                return y, v
+        return None
+
+    def beside_blue(x: int, y0: int, y1: int) -> bool:
+        return bool(blue[max(0, y0):min(h, y1 + 1), x + 1:x + 13].any())
+
+    found = []  # (length, x, top, bottom, frame line): the longest that also passes the width check wins
+    track = grey | blue
+    for x in range(int(w * 0.02), w - 14):
+        col = track[:, x]
+        if not grey[:, x].any():
+            continue
+        edges = np.flatnonzero(np.diff(np.concatenate(([0], col.view(np.int8), [0]))))
+        for start, end in zip(edges[::2], edges[1::2]):  # runs of grey or blue
+            starts = np.flatnonzero(grey[start:end, x])
+            if not len(starts):
+                continue
+            top, bottom = start + starts[0], end - 1  # a run starts on grey
+            n = bottom - top
+            if n < 24:
+                continue
+            arrow = max(8, round(n * 0.3))
+            line = frame_below(x - 20, bottom) if x > 80 else None
+            if line and beside_blue(x, top, top + arrow) and beside_blue(x, bottom - arrow, bottom):
+                found.append((n, x, top, bottom, line))
+    for _, x, top, bottom, (ly, lv) in sorted(found, key=lambda f: -f[0]):
+        right, gap, edge = x - 1, 0, x - 20
+        while edge > 0 and gap <= 2:  # the left: where the frame line under the chat ends (a pixel or two's gap crossed)
+            gap = 0 if even[ly, edge - 1] and abs(shade[ly, edge - 1] - lv) <= 20 else gap + 1
+            edge -= 1
+        edge += gap
+        if right - edge >= 150:  # (narrower: some other grey bar in the scene)
+            top, bottom = max(0, top - 2), min(h, bottom + 2)
+            return {"left": int(edge), "top": int(top), "width": int(right - edge), "height": int(bottom - top)}
+    return None
+
+
 def chat_box_in(img: Image.Image, reader: "Reader", scale: float = FIND_SCALE) -> dict | None:
     """The chat messages' box within an image of the lower game window (see find_chat_region)."""
     old, reader.cfg.scale = reader.cfg.scale, scale  # a coarser read is enough to find the lines

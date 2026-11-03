@@ -142,6 +142,9 @@ class SettingsWindow:
         tick.configure(bg=SIDE, activebackground=SIDE, font=(UI, 8), fg=SOFT)
         tick.pack(side="bottom", fill="x", padx=16)
         label(side, f"Version {updates.VERSION}", soft=True, size=8, bg=SIDE).pack(side="bottom", padx=18, fill="x")
+        report = button(side, "Problem report…", app.problem_report)
+        report.configure(font=(UI, 8))
+        report.pack(side="bottom", anchor="w", padx=18, pady=(0, 6))
 
         self.content = tk.Frame(top, bg=BG, padx=24, pady=20, width=560, height=600)
         self.content.pack(side="left", fill="both", expand=True)

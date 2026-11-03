@@ -23,6 +23,7 @@ copy /y README.md "%OUT%\" >nul
 copy /y LICENSE "%OUT%\LICENSE.txt" >nul
 copy /y config.example.toml "%OUT%\" >nul
 (echo @echo off& echo start "" "%%~dp0CustomClassicChat.exe" --demo) > "%OUT%\CustomClassic Chat demo.bat"
+(echo @echo off& echo start "" "%%~dp0CustomClassicChat.exe" --report) > "%OUT%\CustomClassic Chat problem report.bat"
 rem no chat.json or history in the zip: they are made on first run, so unzipping an update never overwrites them
 powershell -NoProfile -Command "Compress-Archive -Force -Path %OUT% -DestinationPath dist\CustomClassicChat-win64.zip"
 set ISCC=%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe

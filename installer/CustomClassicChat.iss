@@ -66,6 +66,7 @@ Source: "{#Source}\*"; DestDir: "{app}"; Excludes: "\cache,\chat log,\chat.json,
 [Icons]
 Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExe}"
 Name: "{group}\{#AppName} demo"; Filename: "{app}\{#AppExe}"; Parameters: "--demo"; Comment: "Try it with a made-up chat, no game needed"
+Name: "{group}\{#AppName} problem report"; Filename: "{app}\{#AppExe}"; Parameters: "--report"; Comment: "When it doesn't read the game: what it sees, in a file to send"
 Name: "{group}\Chat log folder"; Filename: "{app}\chat log"; Flags: createonlyiffileexists
 Name: "{group}\Uninstall {#AppName}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopicon

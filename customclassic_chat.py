@@ -1120,7 +1120,7 @@ def find_lines(img, reader) -> tuple[dict, float] | None:
     right just before the game's scrollbar, top and bottom at the lines), and the line pitch."""
     import reader as core
     import numpy as np
-    box = core.chat_box_in(img, reader)
+    box = core.chat_box_in(img, reader) or core.chat_box_by_scrollbar(img)  # (by its time stamps, else its scrollbar)
     if not box:
         return None
     crop = img.crop((box["left"], box["top"], box["left"] + box["width"], box["top"] + box["height"]))
@@ -1189,7 +1189,12 @@ def line_pitch(rows) -> float:
         if not centers or c - centers[-1] > height * 0.5:
             centers.append(c)
     if len(centers) >= 2:
-        return round(float(centers[-1] - centers[0]) / (len(centers) - 1), 1)
+        span = float(centers[-1] - centers[0])
+        # a row the text recognition missed leaves a double gap: count the lines by the usual step
+        # (the lower median: one double gap among two steps can't set it)
+        steps = sorted(b - a for a, b in zip(centers, centers[1:]))
+        step = steps[(len(steps) - 1) // 2]
+        return round(span / max(len(centers) - 1, round(span / step)), 1)
     return round(height * 1.25, 1)
 
 
@@ -3417,6 +3422,12 @@ class ChatPanel:
     def icon_path(self) -> Path:
         return save_icon(CACHE_DIR / "customclassic_chat.ico")
 
+    def problem_report(self) -> None:
+        """report.py in a process of its own (it takes its own picture of the game, beside this one's)."""
+        import subprocess
+        args = [sys.executable] if getattr(sys, "frozen", False) else [sys.executable, str(Path(__file__).resolve())]
+        subprocess.Popen(args + ["--report"], cwd=str(HERE))
+
     def open_settings(self) -> None:
         """The settings window (settings_ui.py); a second open brings the first to the front."""
         import settings_ui
@@ -3540,6 +3551,10 @@ def main(argv: list[str]) -> None:
     import overlay
     if "--make-icon" in argv:  # for shortcuts: cache/customclassic_chat.ico
         print(save_icon(CACHE_DIR / "customclassic_chat.ico"))
+        return
+    if "--report" in argv:  # a problem report on the desktop (report.py)
+        import report
+        report.main()
         return
     if "--replay" in argv:
         print_replay([Path(a) for a in argv[argv.index("--replay") + 1:] if not a.startswith("--")])
