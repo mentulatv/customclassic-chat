@@ -247,9 +247,14 @@ class SettingsWindow:
                 app.take_adjust_key()
         check(c, "Ctrl+Alt+F5 also moves and resizes (press it again to keep the place)", hotkey,
               set_hotkey).pack(fill="x", pady=(8, 0))
-        unfocused = tk.BooleanVar(value=self.opts["hide_unfocused"])
-        check(c, "Hide the chat while another program is in front of the game", unfocused,
-              lambda: app.set_opt("hide_unfocused", unfocused.get())).pack(fill="x")
+
+        c = card(page, "Other windows",
+                 "What happens to the chat when another program (a browser, Discord) is in front of the game.")
+        stacking = tk.StringVar(value=self.opts["stacking"])
+        for value, text in (("top", "The chat stays on top of everything"),
+                            ("hide", "The chat hides while another program is active"),
+                            ("game", "The chat stays on the game: a window over the game covers it too")):
+            radio(c, text, stacking, value, lambda: app.set_opt("stacking", stacking.get())).pack(fill="x")
 
         c = card(page, "Reset position",
                  "Lost the panel, or moved it off the chat by accident? This puts it back on the game's chat box. "

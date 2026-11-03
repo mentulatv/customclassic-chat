@@ -84,7 +84,9 @@ DEFAULTS = {
     "game_name": "",          # your character's name, as last read from the game's status bar: what you type goes under it
     "tab": "All",
     "settings_page": "Appearance",  # the settings section open last
-    "hide_unfocused": False,  # the chat overlays hide while another program is in front of the game
+    "stacking": "top",        # the chat overlays among other windows: "top" (on top of everything), "hide" (hidden
+                              # while another program is in front of the game) or "game" (right above the game:
+                              # a window in front of the game covers them too)
     "menu_close_s": 10,       # the right-click menu closes after this many seconds (0: stays until clicked away)
     "adjust_hotkey": False,   # Ctrl+Alt+F5 moves and resizes too (otherwise: right-click → Move or resize…)
     "update_check": True,     # ask GitHub now and then whether a newer version is out, and say so
@@ -2733,7 +2735,9 @@ class ChatPanel:
         import overlay
         self.overlay, self.opts, self.demo = overlay, opts, demo
         self.always_show, self.verbose = always_show, verbose
-        self.away = 0  # since when another program has been in front of the game (Hide when the game isn't in front)
+        self.away = 0  # since when another program has been in front of the game (stacking "hide")
+        if opts.pop("hide_unfocused", False) and opts["stacking"] == "top":  # (its setting before 2.1.3)
+            opts["stacking"] = "hide"
         self.events: queue.Queue = queue.Queue()
         self.log = ChatLog(opts["history"], opts["tab"], self.tabs())
         self.log.hidden = set() if opts["system_messages"] else {"system"}
@@ -2812,6 +2816,7 @@ class ChatPanel:
         if not demo:
             threading.Thread(target=track_loop, args=(self,), daemon=True).start()
         self.tray = start_tray(self)
+        overlay.watch_foreground(self.root)  # (stacking "game": back in front of the game the moment it's clicked)
         if demo:  # no game: a 4-line chat near the bottom of the main screen
             w, h = 900, round(self.line * 4)
             self.main.place({"left": (self.root.winfo_screenwidth() - w) // 2,
@@ -3205,7 +3210,9 @@ class ChatPanel:
         # game window found then), everything hides. Unlocked, it isn't over the game's chat: nothing
         # to step aside for; while typing in it, or with the game's chat closed, it stays
         up = bool(game) or self.always_show
-        if game and self.opts["hide_unfocused"] and not main.edit and not in_front(game["hwnd"]):
+        stacking = self.opts["stacking"]
+        self.overlay.set_game(game["hwnd"] if game and stacking == "game" and not main.edit else None)
+        if game and stacking == "hide" and not main.edit and not in_front(game["hwnd"]):
             self.away = self.away or time.time()
             up = up and time.time() - self.away < 0.5  # (not for a flicker while switching windows)
         else:

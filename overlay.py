@@ -19,7 +19,8 @@ user32 = ctypes.windll.user32 if sys.platform == "win32" else None
 GWL_EXSTYLE = -20
 WS_EX_LAYERED, WS_EX_TRANSPARENT, WS_EX_TOOLWINDOW = 0x00080000, 0x00000020, 0x00000080
 WS_EX_NOACTIVATE, WS_EX_TOPMOST = 0x08000000, 0x00000008
-HWND_TOPMOST = -1
+HWND_TOPMOST, HWND_NOTOPMOST, HWND_TOP = -1, -2, 0
+GW_HWNDPREV = 3  # the window just above, in Windows' stacking order
 SWP_NOSIZE, SWP_NOMOVE, SWP_NOZORDER, SWP_NOACTIVATE = 0x0001, 0x0002, 0x0004, 0x0010
 MOD_ALT, MOD_CONTROL, MOD_NOREPEAT = 0x0001, 0x0002, 0x4000
 WM_HOTKEY = 0x0312
@@ -36,10 +37,86 @@ if user32:
     user32.SetWindowLongPtrW.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_void_p]
     user32.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int,
                                     ctypes.c_int, ctypes.c_int, ctypes.c_uint]
+    user32.GetWindow.restype = wintypes.HWND
+    user32.GetWindow.argtypes = [wintypes.HWND, ctypes.c_uint]
+    user32.SetWinEventHook.restype = ctypes.c_void_p
 GWLP_HWNDPARENT = -8  # a top-level window's owner
 CEILING = None  # a window (the settings) every Overlay stays under while it's open, rather than on top of it
 HOLD = False  # a menu is open: no Overlay re-raises itself over it until it closes
 FRONT: set = set()  # Overlays kept in front of the others (adjust mode's banner)
+GAME = None  # the game's window, when the Overlays sit right above it rather than on top of everything:
+             # then a window in front of the game is in front of them too (set_game)
+ALL: list = []  # every Overlay made, for keeping them together above the game
+_hook = None  # the foreground-change hook's callback (kept, or Windows calls freed memory)
+
+
+def set_game(hwnd) -> None:
+    """Sit right above this window (the game's), or on top of everything again (None)."""
+    global GAME
+    if hwnd == GAME:
+        return
+    GAME = hwnd
+    for o in list(ALL):
+        if o.root.winfo_exists():
+            o.root.attributes("-topmost", not GAME)
+            if GAME:  # (Tk's -topmost off alone leaves Windows' flag on)
+                user32.SetWindowPos(o.hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE)
+    restack()
+
+
+def restack() -> None:
+    """Every Overlay back where it belongs (in front of the game, or on top of everything)."""
+    for o in list(ALL):
+        if o.below is None and not o.hidden and o.root.winfo_exists():
+            o.keep_on_top(again=False)
+
+
+def watch_foreground(root) -> None:
+    """Restack as soon as another window comes to the front: clicking the game brings it in front of
+    the Overlays, and they go straight back in front of it. Windows' callback only notes the change
+    (Tk can't be called from inside it); root's timer restacks within 30 ms."""
+    global _hook
+    if _hook:
+        return
+    proc = ctypes.WINFUNCTYPE(None, ctypes.c_void_p, wintypes.DWORD, wintypes.HWND, wintypes.LONG,
+                              wintypes.LONG, wintypes.DWORD, wintypes.DWORD)
+    changed = [False]
+
+    def note(*_):
+        changed[0] = True
+    _hook = proc(note)
+    hook = user32.SetWinEventHook(3, 3, None, _hook, 0, 0, 0)  # EVENT_SYSTEM_FOREGROUND, out of context
+    import atexit
+    atexit.register(user32.UnhookWinEvent, ctypes.c_void_p(hook))  # (no call into Python while it shuts down)
+
+    def check():
+        if changed[0]:
+            changed[0] = False
+            if GAME:
+                try:
+                    restack()
+                except Exception:
+                    pass
+        root.after(30, check)
+    root.after(30, check)
+
+
+def game_active() -> bool:
+    front = user32.GetForegroundWindow()
+    return bool(front) and user32.GetAncestor(front, 3) == user32.GetAncestor(GAME, 3)  # GA_ROOTOWNER
+
+
+def above_game(own: set):
+    """The window to slot in under: the nearest visible one above the game that isn't one of ours (an
+    invisible one may belong to a program with more rights than this one, and Windows then refuses to
+    slot under it). None: the game is the front-most ordinary window, so the top of them (HWND_TOP)
+    is right above it."""
+    w = user32.GetWindow(GAME, GW_HWNDPREV)
+    while w and (w in own or not user32.IsWindowVisible(w)):
+        w = user32.GetWindow(w, GW_HWNDPREV)
+    if w and user32.GetWindowLongW(w, GWL_EXSTYLE) & WS_EX_TOPMOST:
+        return None  # an always-on-top window (the taskbar…): ours stay below those
+    return w
 
 
 def set_ceiling(window) -> None:
@@ -100,6 +177,9 @@ class Overlay:
         self._grab = None
         self.root.update_idletasks()
         self.hwnd = user32.GetAncestor(self.root.winfo_id(), 2)  # GA_ROOT
+        ALL.append(self)
+        if GAME:
+            self.root.attributes("-topmost", False)
         self.click_through(click_through)
         self.root.after(2000, self.keep_on_top)
 
@@ -121,7 +201,7 @@ class Overlay:
 
     def click_through(self, on: bool) -> None:
         style = user32.GetWindowLongW(self.hwnd, GWL_EXSTYLE)
-        style |= WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TOPMOST
+        style |= WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | (0 if GAME else WS_EX_TOPMOST)
         style = style | WS_EX_TRANSPARENT if on else style & ~WS_EX_TRANSPARENT
         if self.typing:  # shown again or restyled while typing in it: it keeps the keyboard
             style &= ~WS_EX_NOACTIVATE & ~WS_EX_TRANSPARENT
@@ -164,7 +244,26 @@ class Overlay:
                 self.root.after(2000, self.keep_on_top)
             return
         ceiling = CEILING if CEILING and user32.IsWindow(CEILING) else None
-        after = self.below.hwnd if self.below else (ceiling or HWND_TOPMOST)
+        if GAME and not user32.IsWindow(GAME):
+            set_game(None)  # the game closed: on top of everything until it's back
+        if GAME and self not in FRONT and not game_active():
+            # another program is active: right above the game, so that program covers it as it covers the game
+            # (with the game active it's on top as usual: Windows lets no other program's window in front of
+            # the active one, and nothing covers the game then anyway)
+            ALL[:] = [o for o in ALL if o.root.winfo_exists()]
+            after = self.below.hwnd if self.below else above_game({o.hwnd for o in ALL}) or HWND_TOP
+            # the ones behind it first (the backdrop owns the chat, and Windows keeps an owned window right in
+            # front of its owner: the owner has to go down before it can), each out of the always-on-top layer
+            # it was in while the game was active (moving a window behind another doesn't take it out)
+            for w in [o.hwnd for o in self.behind if not o.hidden and o.root.winfo_exists()] + [self.hwnd]:
+                if user32.GetWindowLongW(w, GWL_EXSTYLE) & WS_EX_TOPMOST:
+                    user32.SetWindowPos(w, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE)
+                if w != self.hwnd and not user32.SetWindowPos(w, after, 0, 0, 0, 0,
+                                                               SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE):
+                    after = user32.GetForegroundWindow() or after  # refused all the same: right under the active one
+                    user32.SetWindowPos(w, after, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE)
+        else:
+            after = self.below.hwnd if self.below else (ceiling or HWND_TOPMOST)
         user32.SetWindowPos(self.hwnd, after, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE)
         for o in self.behind:
             if not o.hidden and o.root.winfo_exists():
