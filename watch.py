@@ -26,6 +26,7 @@ from rapidfuzz import fuzz, process
 # files are in its _internal folder); run from source, next to this file
 HERE = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
 NAMES_FILE = HERE / "cache" / "names.json"
+NAMES_SEED = Path(__file__).resolve().parent / "data" / "names.json"  # the copy that ships with it (build.bat)
 NAMES_URL = "https://customclassic.chat/api/names"
 NAMES_EVERY = 3600
 FUZZY = 88  # how close a spelling must be to count
@@ -84,9 +85,9 @@ class Catalog:
         self.keys = list(self.by_norm)
 
     @classmethod
-    def load(cls, url: str = NAMES_URL, cache: Path = NAMES_FILE, fetch=None) -> "Catalog":
+    def load(cls, url: str = NAMES_URL, cache: Path = NAMES_FILE, fetch=None, seed: Path = NAMES_SEED) -> "Catalog":
         """The cached copy while it's under an hour old, else a fresh one (the stale copy if
-        the server can't be reached; none at all just means names aren't suggested)."""
+        the server can't be reached, then the one it shipped with)."""
         try:
             fresh = time.time() - cache.stat().st_mtime < NAMES_EVERY
             items = json.loads(cache.read_text(encoding="utf-8"))["items"]
@@ -99,6 +100,11 @@ class Catalog:
                 cache.parent.mkdir(exist_ok=True)
                 cache.write_text(json.dumps(data), encoding="utf-8")
             except Exception:  # offline or the server's down: keep what we have
+                pass
+        if items is None:
+            try:
+                items = json.loads(seed.read_text(encoding="utf-8"))["items"]
+            except (OSError, ValueError, KeyError):
                 pass
         return cls(items)
 

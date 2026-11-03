@@ -28,7 +28,10 @@ def test_the_catalog_knows_aliases_and_spellings(tmp_path):
     cache = tmp_path / "names.json"
     Catalog.load("x", cache, fetch=lambda url: {"items": ITEMS})
     assert Catalog.load("x", cache, fetch=lambda url: 1 / 0).resolve("wg")  # the cached copy
-    assert Catalog.load("x", tmp_path / "none.json", fetch=lambda url: 1 / 0).items == []
+    none, seed = tmp_path / "none.json", tmp_path / "seed.json"
+    assert Catalog.load("x", none, fetch=lambda url: 1 / 0, seed=none).items == []
+    seed.write_text(json.dumps({"items": ITEMS}), encoding="utf-8")
+    assert Catalog.load("x", none, fetch=lambda url: 1 / 0, seed=seed).resolve("wg")  # the copy it shipped with
 
 
 def test_plain_entries_fire_once_per_player_for_a_while():

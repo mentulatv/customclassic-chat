@@ -22,13 +22,16 @@
 
 ## Download
 
-**[⬇ CustomClassicChat-win64.zip](https://github.com/mentulatv/customclassic-chat/releases/latest/download/CustomClassicChat-win64.zip)** (Windows 10/11)
+**[⬇ CustomClassicChat-setup.exe](https://github.com/mentulatv/customclassic-chat/releases/latest/download/CustomClassicChat-setup.exe)** (Windows 10/11)
 
-1. Unzip it anywhere.
-2. Run the game **windowed** or **borderless**, then `CustomClassicChat.exe`.
+1. Run it: everything the app needs is inside, and it installs for you alone (no administrator).
+2. Run the game **windowed** or **borderless**, then CustomClassic Chat from the Start menu.
 
 "Windows protected your PC"? Click **More info → Run anyway**. The app tells you when there's an
-update: unzip it over the old folder.
+update: run the new installer over it, and your settings and chat log stay.
+
+Rather not install? [CustomClassicChat-win64.zip](https://github.com/mentulatv/customclassic-chat/releases/latest/download/CustomClassicChat-win64.zip)
+has the same program: unzip it anywhere and run `CustomClassicChat.exe`; updates unzip over the old folder.
 
 ## Using it
 
@@ -66,6 +69,6 @@ for the watch list, and Twitch chat if you turn it on.
 - **Chat in the wrong tab:** copy `config.example.toml` to `config.toml` and adjust the colours.
 - **Anything else:** open an issue with a screenshot.
 
-**From source:** `setup.bat` once, then `start.bat`. `build.bat` makes the zip; `python -m pytest` runs the tests.
+**From source:** `setup.bat` once, then `start.bat`. `build.bat` makes the zip and the installer (with [Inno Setup 6](https://jrsoftware.org/isinfo.php)); `python -m pytest` runs the tests.
 
 MIT, see [LICENSE](LICENSE). Not affiliated with Nexon. MapleStory is a trademark of Nexon.

@@ -1,0 +1,9 @@
+CustomClassic Chat is a chat filter and smega blocker for MapleStory Classic World.
+
+It is third-party software, not made or endorsed by Nexon.
+
+It only reads what's on screen (text recognition, plus the colour of the chat's scrollbar). It never opens the game's process, never reads or changes the game's memory or files, never touches its network traffic, and never sends input.
+
+Nexon's terms still don't allow third-party programs, so use it at your own risk.
+
+Everything it needs comes in this installer: no Python, no extra downloads. It is installed for you alone, in your own programs folder, so no administrator is needed. Your settings and chat log are kept next to the program, and a newer version installed over it keeps them.
