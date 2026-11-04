@@ -598,3 +598,21 @@ def test_earlier_session_in_the_chat():
     assert log.visible() == []  # nothing earlier here: no divider either
     assert mc.line_text(mixed[2]) == mixed[2]["body"]
     assert mc.dimmed("#ffffff", "#000000") == "#7f7f7f"
+
+
+def test_settings_live_per_user_and_old_ones_carry_over(tmp_path, monkeypatch):
+    import json
+    import customclassic_chat as mc
+    new, old = tmp_path / "appdata" / "chat.json", tmp_path / "program" / "chat.json"
+    old.parent.mkdir()
+    old.write_text(json.dumps({"twitch_channel": "somechannel", "relay_code": "ABCDEFGHJKLM"}), encoding="utf-8")
+    monkeypatch.setattr(mc, "SETTINGS_FILE", new)
+    monkeypatch.setattr(mc, "OLD_SETTINGS_FILE", old)
+    opts = mc.load_settings()  # first start after the update: the old ones
+    assert opts["twitch_channel"] == "somechannel" and opts["relay_code"] == "ABCDEFGHJKLM"
+    opts["twitch_on"] = True
+    mc.save_settings(opts)
+    assert new.exists()
+    old.write_text(json.dumps({"twitch_channel": "other"}), encoding="utf-8")  # an old copy run again later
+    again = mc.load_settings()
+    assert again["twitch_channel"] == "somechannel" and again["twitch_on"] is True

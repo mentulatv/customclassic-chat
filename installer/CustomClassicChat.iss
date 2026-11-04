@@ -124,15 +124,19 @@ end;
 // Uninstalling removes the program; the player's settings and chat log go only if they say so.
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
-  App: String;
+  App, Settings: String;
 begin
   if (CurUninstallStep = usPostUninstall) and not UninstallSilent then
   begin
     App := ExpandConstant('{app}');
-    if (FileExists(App + '\chat.json') or DirExists(App + '\chat log')) and
+    Settings := ExpandConstant('{userappdata}\CustomClassic Chat');  { since 2.1.4 }
+    if (FileExists(App + '\chat.json') or DirExists(App + '\chat log') or DirExists(Settings)) and
        (MsgBox('Also delete your settings and chat log?' + #13#10#13#10 +
                'Keep them if you plan to install CustomClassic Chat again.',
                mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES) then
+    begin
       DelTree(App, True, True, True);
+      DelTree(Settings, True, True, True);
+    end;
   end;
 end;

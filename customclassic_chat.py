@@ -24,7 +24,8 @@ through, so the game's own chat shows and can be clicked; clicking it again make
     python customclassic_chat.py --demo                       made-up messages, to try the tabs (reads nothing)
     python customclassic_chat.py --replay shot1.png ...       read saved screenshots and print what goes where
 
-Settings: chat.json holds the panel's place (relative to the game window) and the options in DEFAULTS.
+Settings: chat.json in your AppData folder (SETTINGS_FILE) holds the panel's place (relative to the game
+window) and the options in DEFAULTS.
 """
 from __future__ import annotations
 
@@ -45,7 +46,13 @@ from pathlib import Path
 # packaged as an .exe, your settings, history and caches live next to it (the program's own
 # files are in its _internal folder); run from source, next to this file
 HERE = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
-SETTINGS_FILE = HERE / "chat.json"
+# your settings (Twitch channel, guild code and login, windows, colours...) are kept per Windows user,
+# in %APPDATA%\CustomClassic Chat: the same for the installed app, an unzipped copy and the source,
+# and never touched by an update or a reinstall. Before 2.1.4 they were next to the program
+# (OLD_SETTINGS_FILE): copied over the first time (load_settings).
+SETTINGS_DIR = Path(os.environ["APPDATA"]) / "CustomClassic Chat" if os.environ.get("APPDATA") else HERE
+SETTINGS_FILE = SETTINGS_DIR / "chat.json"
+OLD_SETTINGS_FILE = HERE / "chat.json"
 CACHE_DIR = HERE / "cache"
 DEFAULTS = {
     "reading_speed": "fastest",  # how eagerly the chat is read: "fastest", "balanced" or "light" (ReadPace)
@@ -896,14 +903,17 @@ def inside(x: int, y: int, r: dict | None) -> bool:
 
 def load_settings() -> dict:
     opts = json.loads(json.dumps(DEFAULTS))
-    try:
-        opts.update(json.loads(SETTINGS_FILE.read_text(encoding="utf-8")))
-    except (OSError, ValueError):
-        pass
+    for path in (SETTINGS_FILE, OLD_SETTINGS_FILE):  # the old place only until the first save
+        try:
+            opts.update(json.loads(path.read_text(encoding="utf-8")))
+            break
+        except (OSError, ValueError):
+            continue
     return opts
 
 
 def save_settings(opts: dict) -> None:
+    SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
     write_atomic(SETTINGS_FILE, json.dumps({k: opts.get(k) for k in DEFAULTS}, indent=1))
 
 

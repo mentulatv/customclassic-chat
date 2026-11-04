@@ -171,10 +171,11 @@ class Report:
 
     def logs(self) -> None:
         try:
-            opts = json.loads(mc.SETTINGS_FILE.read_text(encoding="utf-8"))
+            path = mc.SETTINGS_FILE if mc.SETTINGS_FILE.exists() else mc.OLD_SETTINGS_FILE
+            opts = json.loads(path.read_text(encoding="utf-8"))
             self.files["settings.json"] = json.dumps({k: "(left out)" if k in SECRET else v for k, v in opts.items()},
                                                      indent=1).encode()
-            self.say(f"Settings: {len(opts)} (guild login and Discord details left out)")
+            self.say(f"Settings: {len(opts)} in {path} (guild login and Discord details left out)")
         except (OSError, ValueError) as e:
             self.say(f"Settings: none yet ({e.__class__.__name__})")
         for name, path, tail in (("errors.log", mc.ERROR_LOG, 40000), ("crash.log", mc.HERE / "crash.log", 40000),
