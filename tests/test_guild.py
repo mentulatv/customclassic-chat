@@ -4,9 +4,11 @@ import guild_relay as g
 
 def test_guild_codes():
     assert g.guild_key(" abcd efgh jklm ") == "ABCD-EFGH-JKLM" == g.guild_key("ABCD-EFGH-JKLM")
-    assert g.guild_key("ABCD-EFGH-1234") == ""  # 1 isn't in codes
-    assert g.guild_key("MapleGuild") == ""  # a guild's name doesn't join: only its code
-    assert g.guild_key("two words") == "" and g.guild_key("") == ""
+    # anything else of letters and digits is a custom code (only the bot's owner binds one), in capitals
+    assert g.guild_key("GuildTest") == "GUILDTEST" == g.guild_key(" guildtest ")
+    assert g.guild_key("ABCD-EFGH-1234") == "ABCDEFGH1234"
+    assert g.guild_key("short") == "" and g.guild_key("x" * 25) == ""
+    assert g.guild_key("two words!") == "" and g.guild_key("") == "" and g.guild_key("guild_test") == ""
     assert len(g.new_code()) == 14 and g.guild_key(g.new_code())
     assert g.bot_invite("MTIzNDU2Nzg5MDEyMzQ1Njc4.x.y").endswith("client_id=123456789012345678&scope=bot&permissions=66560")
 

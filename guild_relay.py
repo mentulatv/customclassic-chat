@@ -45,6 +45,10 @@ SHARED_BOT_KEY = "3e9sP7ifaw8Yi7safdCydoBAuGHuqjlRx_7Tmm748s4"
 LOGIN_PORT = 47321  # the magic link opens http://127.0.0.1:47321/login?t=…: this app, on this PC only
 ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # no 0/O or 1/I: easy to read out
 CODE = re.compile(r"^[A-Z2-9]{12}$")
+# a custom code, set only by the shared bot's owner (/bind … code:): letters and digits, any case,
+# e.g. GuildTest for the CustomClassic Chat server's public test channel. Every other guild gets a
+# random code (new_code), which can't be guessed.
+CUSTOM = re.compile(r"^[A-Z0-9]{6,24}$")
 WEBHOOK = re.compile(r"^https://(?:canary\.|ptb\.)?discord(?:app)?\.com/api/webhooks/(\d{5,25})/([\w-]{20,120})$")
 # what can be shared: guild chat, or, to test before the game has guild chat, map chat or whispers
 SOURCES = [("guild", "Guild chat")]  # the only chat ever shared
@@ -63,9 +67,12 @@ def new_code() -> str:
 
 
 def guild_code(text: str) -> str:
-    """'abcd efgh jklm', 'ABCD-EFGH-JKLM' … as ABCD-EFGH-JKLM; '' when it isn't a guild code."""
+    """'abcd efgh jklm', 'ABCD-EFGH-JKLM' … as ABCD-EFGH-JKLM; a custom code ('GuildTest') in capitals
+    (GUILDTEST); '' when it's neither."""
     t = re.sub(r"[\s-]", "", (text or "").upper())
-    return f"{t[:4]}-{t[4:8]}-{t[8:]}" if CODE.match(t) and all(c in ALPHABET for c in t) else ""
+    if CODE.match(t) and all(c in ALPHABET for c in t):
+        return f"{t[:4]}-{t[4:8]}-{t[8:]}"
+    return t if CUSTOM.match(t) else ""
 
 
 def guild_key(text: str) -> str:

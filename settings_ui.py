@@ -410,7 +410,7 @@ class SettingsWindow:
             key = guild_relay.guild_key(code.get())
             if not key:
                 note.configure(text="Not in a guild's chat." if not code.get().strip() else
-                               "That isn't a guild code (it looks like ABCD-EFGH-JKLM).", fg=SOFT)
+                               "That isn't a guild code (it looks like ABCD-EFGH-JKLM, or a word of 6 to 24 letters and digits).", fg=SOFT)
                 return
             cfg = opts["relay_cfg"].get(key) or opts["relay_admin"].get(key) or {}
             peer = app.relay
