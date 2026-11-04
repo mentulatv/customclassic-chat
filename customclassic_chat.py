@@ -1695,6 +1695,15 @@ def dragged_rect(zone: str, r: dict, dx: int, dy: int, min_w: int, min_h: int) -
     return {"left": left, "top": top, "width": w, "height": h}
 
 
+def guild_typer(app) -> str:
+    """Who you type in the Guild tab as: your character (from the game's status bar), with your
+    Discord name when logged in through /chatlink; "" while neither is known."""
+    login = app.opts["guild_login"]
+    logged = guild_relay.check_login(login) if login else None
+    game = app.game_name()
+    return guild_relay.who(game, logged["name"]) if logged and game else (logged["name"] if logged else game) or ""
+
+
 class OverlayPane:
     """One pane of an overlay frame: its row (or rows) of tabs, its messages and scrollbar, and on
     the Guild tab a line to type in. Panes stack in their frame, top down, and draw on its canvases."""
@@ -1954,9 +1963,7 @@ class OverlayPane:
             self.input.place_forget()
             return
         app = self.app
-        logged = guild_relay.check_login(self.opts["guild_login"]) if self.opts["guild_login"] else None
-        game = app.game_name()
-        me = guild_relay.who(game, logged["name"]) if logged and game else (logged["name"] if logged else game)
+        me = guild_typer(app)
         self.input.configure(font=app.font, state="normal" if me else "disabled")
         if not self.typing and (not self.typed.get() or self.placeholder):
             self.input.configure(fg=SOFT)
@@ -2532,8 +2539,18 @@ class ChatPane:
         self.bar.pack(fill="x")
         self.bar.bind("<Configure>", lambda e: self.flow())
         self.tab_buttons = []
-        body = tk.Frame(self.frame, bg=PANEL)
+        body = self.body = tk.Frame(self.frame, bg=PANEL)
         body.pack(fill="both", expand=True)
+        # on the Guild tab, a line to type to the guild's Discord channel (shown by show_input)
+        self.typed = tk.StringVar()
+        self.placeholder = False
+        self.input = tk.Entry(self.frame, textvariable=self.typed, bg="#0b1120", fg=INK, insertbackground=INK,
+                              relief="flat", highlightthickness=1, highlightbackground="#2a3654",
+                              highlightcolor="#3d6fd1", disabledbackground="#0b1120", disabledforeground=SOFT)
+        self.input.bind("<FocusIn>", self.start_typing)
+        self.input.bind("<FocusOut>", lambda e: self.show_input())
+        self.input.bind("<Return>", self.send_typed)
+        self.input.bind("<Escape>", lambda e: (self.typed.set(""), self.text.focus_set()))
         scroll = tk.Scrollbar(body)
         scroll.pack(side="right", fill="y")
         self.text = tk.Text(body, bg=app.opts["panel_bg"] or PANEL, fg=INK, wrap="word", relief="flat", padx=8,
@@ -2616,6 +2633,44 @@ class ChatPane:
             t.see("end")
         else:
             t.yview(f"{max(1, lines('end-1c') - from_end)}.0")
+        self.show_input()
+
+    # the typing line (the Guild tab) ---------------------------------------------------
+
+    def show_input(self) -> None:
+        """The typing line under the messages while the Guild tab shows and the guild is joined,
+        with a hint in it until it's clicked."""
+        app = self.win.app
+        if self.log.tab != "Guild" or getattr(app, "relay", None) is None:
+            if self.input.winfo_manager():
+                self.input.pack_forget()
+            return
+        if not self.input.winfo_manager():
+            self.input.pack(side="bottom", fill="x", padx=6, pady=(2, 6), ipady=3, before=self.body)
+        me = guild_typer(app)
+        self.input.configure(font=app.font, state="normal" if me else "disabled")
+        typing = self.input.focus_get() is self.input
+        if not typing and (not self.typed.get() or self.placeholder):
+            self.input.configure(fg=SOFT)
+            self.typed.set(f"Message the guild as {me}… (click, type, Enter)" if me else
+                           "Your character's name is read from the game's status bar…")
+            self.placeholder = True
+
+    def start_typing(self, e=None) -> None:
+        if self.placeholder:
+            self.typed.set("")
+            self.placeholder = False
+        self.input.configure(fg=INK)
+
+    def send_typed(self, e=None) -> None:
+        app = self.win.app
+        text = "" if self.placeholder else self.typed.get().strip()
+        if text and app.relay:
+            problem = app.relay.say_chat(text)
+            if problem:
+                app.events.put(("status", f"Not sent: {problem}."))
+            else:
+                self.typed.set("")
 
 
 class NormalChat:
