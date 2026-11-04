@@ -76,6 +76,7 @@ class Config:
     backgrounds: dict = field(default_factory=lambda: dict(BACKGROUNDS))
     color_tolerance: int = 45
     threads: int = 0  # cores text recognition may use at once; 0: a few (see ocr_threads), the rest stay the game's
+    drop_scene: bool = True  # blank the dim game scene behind the see-through chat before reading (see drop_scene)
 
     @classmethod
     def load(cls, path: Path = CONFIG) -> "Config":
@@ -123,21 +124,27 @@ class Reader:
                   "EngineConfig.onnxruntime.inter_op_num_threads": 1}
         self.engine = RapidOCR(params=params) if _rapid_accepts_params() else RapidOCR()
 
-    def read(self, img: Image.Image) -> list[Line]:
+    def read(self, img: Image.Image, chat: bool = False) -> list[Line]:
+        """The lines in `img`. chat: `img` is the game's chat box, so the scene showing through
+        it is blanked first (drop_scene); not for other parts of the game's window."""
         rgb = img.convert("RGB")
+        arr = np.asarray(rgb)
+        rgb_ocr = Image.fromarray(drop_scene(arr, self.cfg.backgrounds)) if chat and self.cfg.drop_scene else rgb
+        lines = self._read(rgb_ocr)
+        for ln in lines:  # colours from the picture as it is
+            ln.color, ln.bg, ln.band = _line_colors(arr, ln)
+            ln.source = self._classify(ln)
+        return lines
+
+    def _read(self, rgb: Image.Image) -> list[Line]:
         boxes = self._ocr(rgb)
         if not boxes:
             return []
         height = float(np.median([b[1] - b[0] for b in boxes]))
         # (a row padded with spacers reads with little confidence however it's read: reading it
         # again on its own took half of each read in the Free Market, for nothing)
-        lines = [ln if ln.conf >= REREAD_BELOW or PADDING.search(ln.text) else self._reread(rgb, ln, height)
-                 for ln in self._group(boxes)]
-        arr = np.asarray(rgb)
-        for ln in lines:
-            ln.color, ln.bg, ln.band = _line_colors(arr, ln)
-            ln.source = self._classify(ln)
-        return lines
+        return [ln if ln.conf >= REREAD_BELOW or PADDING.search(ln.text) else self._reread(rgb, ln, height)
+                for ln in self._group(boxes)]
 
     def _ocr(self, img: Image.Image) -> list[tuple]:
         """(top, bottom, left, right, text, confidence) boxes in the image's own pixels."""
@@ -239,6 +246,35 @@ def _rapid_accepts_params() -> bool:
     except Exception:
         return False
 
+
+
+SCENE_BELOW = 200  # brightest channel under this, outside a megaphone band: the scene, not chat text
+
+
+def drop_scene(arr: np.ndarray, bands: dict | None = None, below: int = SCENE_BELOW) -> np.ndarray:
+    """The chat box with the game scene behind it blanked. The game's chat box is see-through, so
+    name tags, speech bubbles and signs behind it show through, and text recognition read them
+    into the chat ("...wood@@@ DoZZims Bleco Maorio", "Trade me join forces with"). Every chat
+    colour has a channel at full brightness (white, green, yellow, pink, orange); the scene
+    through the chat box is duller (a grey bubble ~200 at most, its red words ~170, name tags
+    ~130). So, outside the megaphones' bands (whose dark text must stay), pixels whose brightest
+    channel is under `below` become black. A pixel row is a band when much of it is one of the
+    band colours (`bands`, as BACKGROUNDS); the rows just above and below count too."""
+    px = arr.astype(np.int16)
+    band = np.zeros(arr.shape[0], bool)
+    for value in (bands if bands is not None else BACKGROUNDS).values():
+        for rgb in (value if value and isinstance(value[0], list) else [value]):
+            near = np.abs(px - np.array(rgb, np.int16)).sum(axis=2) < 60
+            band |= near.mean(axis=1) >= 0.3
+    for _ in range(2):
+        band = band | np.r_[band[1:], False] | np.r_[False, band[:-1]]
+    bright = arr.max(axis=2)
+    if (~band).any():  # the game dims everything while it fades (a map change): the cut dims with it
+        below = below * min(255, max(64, int(np.percentile(bright[~band], 99.5)))) / 255
+    dim = (bright < below) & ~band[:, None]
+    out = arr.copy()
+    out[dim] = 0
+    return out
 
 
 def _line_colors(arr: np.ndarray, ln: Line):

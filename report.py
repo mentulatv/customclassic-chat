@@ -157,7 +157,7 @@ class Report:
         out = io.BytesIO()
         crop.save(out, "PNG")
         self.files["chat.png"] = out.getvalue()
-        lines = reader.read(crop)
+        lines = reader.read(crop, chat=True)
         self.say(f"Lines read: {len(lines)}")
         for ln in lines:
             self.say(f"   {ln.text}")

@@ -36,3 +36,29 @@ def test_a_longer_grey_bar_in_the_scene_doesnt_hide_the_chat():
     a[383, 40:114] = (12, 12, 12)
     box = chat_box_by_scrollbar(Image.fromarray(a))
     assert box and box["left"] + box["width"] == 759
+
+
+def test_drop_scene_blanks_the_dim_scene_but_keeps_chat_text_and_bands():
+    import numpy as np
+    from reader import drop_scene, BACKGROUNDS
+    img = np.full((30, 100, 3), 40, np.uint8)       # the scene through the chat box
+    img[2:6, 10:20] = 255                            # white map chat
+    img[2:6, 60:70] = (120, 110, 100)                # a name tag behind the chat
+    img[8:12, 30:40] = (0, 255, 0)                   # a whisper
+    img[8:12, 60:70] = (190, 190, 190)               # a grey speech bubble behind it
+    img[20:28] = BACKGROUNDS["super_megaphone"]      # a megaphone band...
+    img[22:26, 10:20] = (119, 0, 66)                 # ...and its dark text
+    out = drop_scene(img)
+    assert (out[2:6, 10:20] == 255).all() and (out[8:12, 30:40] == img[8:12, 30:40]).all()
+    assert (out[2:6, 60:70] == 0).all() and (out[8:12, 60:70] == 0).all()
+    assert (out[20:28] == img[20:28]).all()
+
+
+def test_drop_scene_follows_a_fade():
+    import numpy as np
+    from reader import drop_scene
+    img = np.full((10, 50, 3), 20, np.uint8)
+    img[2:6, 5:15] = 178                             # white text, the whole picture dimmed by a fade
+    img[2:6, 30:40] = 80                             # the scene behind, dimmed too
+    out = drop_scene(img)
+    assert (out[2:6, 5:15] == 178).all() and (out[2:6, 30:40] == 0).all()

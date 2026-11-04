@@ -1538,7 +1538,7 @@ def read_loop(app) -> None:
                                                         chat_changed(base, pixels))
                         if img and ((moved and t0 >= next_read) or t0 - last_read >= IDLE_READ_S):
                             seen0, fresh0, w0 = dedupe.looked, dedupe.fresh, time.perf_counter()
-                            read = reader.read(img)
+                            read = reader.read(img, chat=True)
                             read_s = time.perf_counter() - w0
                             # the game drew something over its chat: a party invite or trade request
                             # (its words land among the lines read, before the scene is left out:
@@ -3547,14 +3547,14 @@ def print_replay(paths: list[Path]) -> None:
                 b = found[0]
                 top = int(img.height * 0.35) + b["top"]
                 img = img.crop((b["left"], top, b["left"] + b["width"], top + b["height"]))
-        read = reader.read(img)
+        read = reader.read(img, chat=True)
         pitch = found[1] if found else 16.0
         stamps = [ln for ln in read if core.TIMESTAMP.match(ln.text)]
         if not found and len(stamps) >= 2:  # a crop of the chat as saved: start it at the time stamps, as live
             tops = sorted(ln.top for ln in stamps)
             pitch = float(sorted(b - a for a, b in zip(tops, tops[1:]))[(len(tops) - 1) // 2])
             img = img.crop((max(0, min(ln.left for ln in stamps) - 4), 0, img.width, img.height))
-            read = reader.read(img)
+            read = reader.read(img, chat=True)
         lines = core.merge_wrapped(trim_scene(read, pitch), img.height, img.width)
         print(f"{p.name}:")
         for ln in lines:
