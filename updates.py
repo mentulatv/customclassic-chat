@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import re
 
-VERSION = "2.1.2"  # this version: bump it with every release (its tag is "v" + this)
+VERSION = "2.1.3"  # this version: bump it with every release (its tag is "v" + this)
 REPO = "mentulatv/customclassic-chat"
 LATEST = f"https://api.github.com/repos/{REPO}/releases/latest"
 RELEASES = f"https://github.com/{REPO}/releases/latest"
