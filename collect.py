@@ -1,6 +1,6 @@
 """A collection: the problem report plus a minute of the chat, for improving the reading on setups
 other than ours. Every 2 s a picture of the chat area (its scrollbar and the frame under it
-included) with what was found and read in it and how long that took, three pictures of the whole
+included) with what was found and read in it and how long that took, two pictures of the whole
 game window, the player's note and display settings, and this PC's processor and memory.
 Sent with Upload to customclassic.chat (customclassic-server's collect service), or saved on the
 desktop. Opened from Settings → Problem report…, the Start menu, or CustomClassicChat.exe --report.
