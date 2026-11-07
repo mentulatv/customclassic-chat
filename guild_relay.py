@@ -23,6 +23,7 @@ to test, before the game has guild chat). Nothing is ever typed into the game.
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
 import os
@@ -86,12 +87,18 @@ def key_label(key: str) -> str:
     return key
 
 
+@functools.lru_cache(maxsize=16)
+def code_key(code: str) -> bytes:
+    """The key made from a guild code: slow on purpose, so kept for codes joined again."""
+    return hashlib.pbkdf2_hmac("sha256", code.replace("-", "").encode(), b"customclassic-chat guild", 200_000)
+
+
 class Seal:
     """The guild's key, from its code: it names the channel and seals every message on it."""
 
     def __init__(self, code: str):
         from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-        self.key = hashlib.pbkdf2_hmac("sha256", code.replace("-", "").encode(), b"customclassic-chat guild", 200_000)
+        self.key = code_key(code)
         self.aead = AESGCM(self.key)
         self.topic = "ccchat/" + hashlib.sha256(b"topic:" + self.key).hexdigest()[:32]
 
@@ -359,6 +366,8 @@ class GuildPeer:
                 pass
 
     def heard(self, blob: bytes, now: float | None = None) -> None:
+        if self.stopped.is_set():
+            return  # left: a broker still letting go isn't heard any more
         msg = self.seal.open(blob)
         if not msg or msg.get("id") in self.seen:
             return
@@ -510,13 +519,19 @@ class GuildPeer:
         self.say({"t": "cfg", "cfg": {"closed": True}}, retain=True, sub="cfg")
 
     def stop(self) -> None:
+        """Leave the channel. Returns at once: the brokers are let go in the background, since a
+        broker still connecting (slow, or blocked on this network) holds loop_stop for seconds."""
         self.stopped.set()
-        for c in self.clients:
-            try:
-                c.loop_stop()
-                c.disconnect()
-            except Exception:
-                pass
+        clients, self.clients = self.clients, []
+
+        def let_go():
+            for c in clients:
+                try:
+                    c.disconnect()
+                    c.loop_stop()
+                except Exception:
+                    pass
+        threading.Thread(target=let_go, daemon=True).start()
 
 
 def join_text(key: str) -> str:

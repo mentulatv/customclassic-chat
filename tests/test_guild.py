@@ -102,3 +102,24 @@ def test_a_closed_guild_stops_sharing():
     net.app("pc-adm", share=False, admin={"name": "N", "webhook": "https://discord.com/api/webhooks/1/x"}).close_guild()
     a.send(msg("after closing"), now=100)
     assert not a.matcher.pending
+
+
+def test_leaving_never_waits_for_a_broker_and_hears_nothing_after():
+    import time
+    import guild_relay as gr
+
+    class SlowBroker:  # a broker still connecting: letting it go takes seconds
+        def disconnect(self):
+            pass
+
+        def loop_stop(self):
+            time.sleep(3)
+
+    heard = []
+    peer = gr.GuildPeer("GUILDTEST", "r1", heard.append, True, True, connect=False)
+    peer.clients = [SlowBroker()]
+    t = time.perf_counter()
+    peer.stop()
+    assert time.perf_counter() - t < 0.2
+    peer.heard(peer.seal.seal({"t": "say", "text": "hi", "id": "x1", "from": "r2"}))
+    assert heard == []

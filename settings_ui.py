@@ -434,7 +434,13 @@ class SettingsWindow:
             app.set_relay(key, tab.get())
             code.set(guild_relay.key_label(key))
             note.configure(text="Joining…" if app.relay else "", fg=SOFT)
+
+        def leave():
+            code.set("")
+            app.set_relay("", tab.get())
+            show_status()
         button(row, "Join", use).pack(side="left")
+        button(row, "Leave", leave).pack(side="left", padx=(6, 0))
         field.bind("<Return>", use)
         check(c, "Show a Guild tab (the Discord channel, and typing to it)", tab, use).pack(fill="x", pady=(8, 0))
         waiting.pack(fill="x", pady=(6, 0))

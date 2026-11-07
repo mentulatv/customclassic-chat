@@ -3577,10 +3577,16 @@ class ChatPanel:
             self.relay.game_name = self.game_name()
 
     def set_relay(self, code: str, tab: bool) -> None:
+        """Join (or with no code, leave) a guild's channel; Join again with the same code only
+        changes the Guild tab, without leaving and joining again."""
+        same = self.relay and guild_relay.guild_key(code) == guild_relay.guild_key(self.opts["relay_code"])
         self.opts["relay_code"] = guild_relay.guild_key(code)
         self.opts["relay_tab"] = tab
         save_settings(self.opts)
-        self.start_relay()
+        if same:
+            self.relay.tab = tab
+        else:
+            self.start_relay()
         self.retab()
         self.scroll = 0
         self.render()
