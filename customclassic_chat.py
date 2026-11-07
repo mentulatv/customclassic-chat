@@ -3644,9 +3644,9 @@ def main(argv: list[str]) -> None:
     if "--make-icon" in argv:  # for shortcuts: cache/customclassic_chat.ico
         print(save_icon(CACHE_DIR / "customclassic_chat.ico"))
         return
-    if "--report" in argv:  # a problem report on the desktop (report.py)
-        import report
-        report.main()
+    if "--report" in argv:  # a problem report with a minute of the chat, uploaded or on the desktop (collect.py)
+        import collect
+        collect.main()
         return
     if "--replay" in argv:
         print_replay([Path(a) for a in argv[argv.index("--replay") + 1:] if not a.startswith("--")])
