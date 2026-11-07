@@ -150,7 +150,10 @@ class Reader:
         """(top, bottom, left, right, text, confidence) boxes in the image's own pixels."""
         s = self.cfg.scale
         big = img.resize((int(img.width * s), int(img.height * s)), Image.LANCZOS) if s != 1 else img
-        res = self.engine(np.asarray(big))
+        try:
+            res = self.engine(np.asarray(big))
+        except Exception:  # (rapidocr gives up on a very wide, very flat strip instead of returning nothing)
+            return []
         if res is None or res.boxes is None or res.txts is None:
             return []
         boxes = []
@@ -397,14 +400,28 @@ def chat_box_by_scrollbar(img: Image.Image) -> dict | None:
     even = hi - lo <= 12  # a neutral shade: the frame line, blended or not
     shade = a.sum(axis=2) / 3
 
-    def frame_below(x: int, bottom: int):
+    def frame_rows(x: int, bottom: int) -> list:
+        """The frame line's candidate rows: the first dark even row below the track and the few
+        after it (a game drawn at a lower resolution and stretched blurs the line over 2-3 rows)."""
+        rows, first = [], None
         for y in range(bottom + 1, min(h, bottom + 30)):
+            if first is not None and y > first + 3:
+                break
             if x - 41 < 0 or not even[y, x - 1] or shade[y, x - 1] > 150:
                 continue
             v = shade[y, x - 1]
             if np.count_nonzero(even[y, x - 40:x] & (np.abs(shade[y, x - 40:x] - v) <= 20)) >= 38:
-                return y, v
-        return None
+                rows.append((y, v))
+                first = y if first is None else first
+        return rows
+
+    def left_end(x: int, ly: int, lv: float) -> int:
+        """Where the frame line under the chat ends (a pixel or two's gap crossed)."""
+        gap, edge = 0, x
+        while edge > 0 and gap <= 2:
+            gap = 0 if even[ly, edge - 1] and abs(shade[ly, edge - 1] - lv) <= 20 else gap + 1
+            edge -= 1
+        return edge + gap
 
     def beside_blue(x: int, y0: int, y1: int) -> bool:
         return bool(blue[max(0, y0):min(h, y1 + 1), x + 1:x + 13].any())
@@ -425,15 +442,12 @@ def chat_box_by_scrollbar(img: Image.Image) -> dict | None:
             if n < 24:
                 continue
             arrow = max(8, round(n * 0.3))
-            line = frame_below(x - 20, bottom) if x > 80 else None
-            if line and beside_blue(x, top, top + arrow) and beside_blue(x, bottom - arrow, bottom):
-                found.append((n, x, top, bottom, line))
-    for _, x, top, bottom, (ly, lv) in sorted(found, key=lambda f: -f[0]):
-        right, gap, edge = x - 1, 0, x - 20
-        while edge > 0 and gap <= 2:  # the left: where the frame line under the chat ends (a pixel or two's gap crossed)
-            gap = 0 if even[ly, edge - 1] and abs(shade[ly, edge - 1] - lv) <= 20 else gap + 1
-            edge -= 1
-        edge += gap
+            rows = frame_rows(x - 20, bottom) if x > 80 else []
+            if rows and beside_blue(x, top, top + arrow) and beside_blue(x, bottom - arrow, bottom):
+                found.append((n, x, top, bottom, rows))
+    for _, x, top, bottom, rows in sorted(found, key=lambda f: -f[0]):
+        right = x - 1
+        edge = min(left_end(x - 20, ly, lv) for ly, lv in rows)  # the left: the line that runs furthest
         if right - edge >= 150:  # (narrower: some other grey bar in the scene)
             top, bottom = max(0, top - 2), min(h, bottom + 2)
             return {"left": int(edge), "top": int(top), "width": int(right - edge), "height": int(bottom - top)}
