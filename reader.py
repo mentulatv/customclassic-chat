@@ -395,7 +395,7 @@ def chat_box_by_scrollbar(img: Image.Image) -> dict | None:
     a = np.asarray(img.convert("RGB"), dtype=np.int16)
     h, w = a.shape[:2]
     hi, lo = a.max(axis=2), a.min(axis=2)
-    grey = (hi - lo <= 10) & (lo >= 140)
+    grey = (hi - lo <= 16) & (lo >= 140)  # (the track's edge is a little see-through: over sand it's warm)
     blue = (a[:, :, 2] - a[:, :, 0] >= 40) & (a[:, :, 2] > a[:, :, 1])
     even = hi - lo <= 12  # a neutral shade: the frame line, blended or not
     shade = a.sum(axis=2) / 3
@@ -445,12 +445,18 @@ def chat_box_by_scrollbar(img: Image.Image) -> dict | None:
             rows = frame_rows(x - 20, bottom) if x > 80 else []
             if rows and beside_blue(x, top, top + arrow) and beside_blue(x, bottom - arrow, bottom):
                 found.append((n, x, top, bottom, rows))
-    for _, x, top, bottom, rows in sorted(found, key=lambda f: -f[0]):
+    boxes = []  # the biggest wins: the chat's box is bigger than any other window with a scrollbar
+    for n, x, top, bottom, rows in found:  # (the minimap's is taller, a small window's can be as wide)
+        if any(0 < x - x2 <= 14 and t2 < bottom and top < b2 for _, x2, t2, b2, _ in found):
+            continue  # the same scrollbar, a column further in: its left edge is the one
         right = x - 1
         edge = min(left_end(x - 20, ly, lv) for ly, lv in rows)  # the left: the line that runs furthest
         if right - edge >= 150:  # (narrower: some other grey bar in the scene)
-            top, bottom = max(0, top - 2), min(h, bottom + 2)
-            return {"left": int(edge), "top": int(top), "width": int(right - edge), "height": int(bottom - top)}
+            boxes.append(((right - edge) * n, edge, right, top, bottom))
+    if boxes:
+        _, edge, right, top, bottom = max(boxes)
+        top, bottom = max(0, top - 2), min(h, bottom + 2)
+        return {"left": int(edge), "top": int(top), "width": int(right - edge), "height": int(bottom - top)}
     return None
 
 

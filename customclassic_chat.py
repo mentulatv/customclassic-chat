@@ -1180,9 +1180,15 @@ def scrollbar_right(arr, centers, start: int) -> int | None:
     for y in centers:
         row = arr[int(y), start:start + 200].astype(int).mean(axis=1)
         i = 0
-        while i < min(len(row), 12) and row[i] < 140:
+        while i < min(len(row), 3) and 140 <= row[i] < 200:
+            i += 1  # the band's blended edge, when it was taken for the band (a stretched game)
+        d = i
+        while i < min(len(row), d + 12) and row[i] < 140:
             i += 1  # the dark divider
-        j = i
+        k = i
+        while k < min(len(row), i + 2) and row[k] < 200:
+            k += 1  # a pixel or two blending it into the track (a game stretched from a lower resolution)
+        i = j = k
         while j < len(row) and row[j] >= 200:
             j += 1  # the light track
         if j - i >= 6:
